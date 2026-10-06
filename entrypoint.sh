@@ -7,7 +7,7 @@ setup_runtime /orca/bashrc.sh || exit 1
 export PATH="/orca/npm-global/bin:/orca/google-cloud-sdk/bin:${PATH}"
 export SHELL=/bin/bash
 
-PERSIST="${PROJECTS_ROOT:-/projects}/.devspaces-orca"
+PERSIST="${PROJECTS_ROOT:-/projects}/.che-orca"
 mkdir -p "$PERSIST/gcloud" "$PERSIST/orca-home" \
          "$PERSIST/opencode-config" "$PERSIST/opencode-share" "$PERSIST/opencode-state" || exit 1
 chmod 700 "$PERSIST" || exit 1

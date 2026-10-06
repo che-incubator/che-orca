@@ -66,7 +66,7 @@ class EditorScriptTests(unittest.TestCase):
             workspace_pod("another-pod", ready=False, created="2026-10-03T11:00:00Z"),
         )
         stub = f"#!{sys.executable}\n" + '''
-import json, os, sys, time
+import json, os, subprocess, sys, time
 from pathlib import Path
 tool = Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -106,6 +106,12 @@ if tool == "oc":
     elif args[:2] == ["get", "route"]:
         print("editor.test.example")
     elif args[0] == "exec":
+        if "node" in args and os.environ.get("TEST_PROJECTS_ROOT"):
+            script = args[-1].replace("/projects/", os.environ["TEST_PROJECTS_ROOT"] + "/")
+            result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+            sys.stdout.write(result.stdout)
+            sys.stderr.write(result.stderr)
+            sys.exit(result.returncode)
         print("https://editor.test.example/paired" if "node" in args else "test-token")
 elif tool == "podman" and os.environ.get("TEST_BUILD_FAILURE"):
     sys.exit(1)
@@ -411,3 +417,21 @@ elif tool == "podman" and os.environ.get("TEST_BUILD_FAILURE"):
         self.assertEqual(result.stdout.strip(), "yes")
         self.assertEqual(len((home / ".bashrc").read_text().splitlines()), 1)
         self.assertEqual((home / ".bashrc").stat().st_mode & 0o777, 0o600)
+
+    def test_deployment_reads_pairing_url_from_che_state(self):
+        projects = self.root / "projects"
+        state = projects / ".che-orca"
+        state.mkdir(parents=True)
+        pairing_url = "https://editor.test.example/#test-pairing-offer"
+        readiness = {
+            "type": "orca_server_ready",
+            "schemaVersion": 1,
+            "pairing": {"available": True, "webClientUrl": pairing_url},
+        }
+        (state / "ready.jsonl").write_text("Orca starting\n" + json.dumps(readiness) + "\n")
+        self.env["TEST_PROJECTS_ROOT"] = str(projects)
+
+        result, _ = self.run_script("orca", "deploy.sh")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"URL:      {pairing_url}", result.stdout)

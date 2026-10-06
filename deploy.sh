@@ -34,7 +34,7 @@ WEB_URL=""
 for _ in $(seq 1 60); do
   WEB_URL=$(oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- node -e '
     const fs = require("fs");
-    const lines = fs.readFileSync("/projects/.devspaces-orca/ready.jsonl", "utf8").split("\n");
+    const lines = fs.readFileSync("/projects/.che-orca/ready.jsonl", "utf8").split("\n");
     for (const line of lines) {
       let ready;
       try { ready = JSON.parse(line); } catch { continue; }

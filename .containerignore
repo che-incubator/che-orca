@@ -12,8 +12,8 @@ config.env.*
 **/*.log
 *-rendered.yaml
 **/*-rendered.yaml
-.devspaces-*
-**/.devspaces-*
+.che-orca
+**/.che-orca
 entrypoint-logs.txt
 **/entrypoint-logs.txt
 opencode.json

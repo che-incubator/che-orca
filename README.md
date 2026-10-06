@@ -1,6 +1,6 @@
-# Orca for OpenShift Dev Spaces
+# Orca for Eclipse Che
 
-Run [Orca](https://github.com/stablyai/orca) — a web environment for coding agents and parallel git worktrees — as an editor in an OpenShift Dev Spaces workspace, with [OpenCode](https://opencode.ai) and automatic discovery of KServe models in your cluster.
+Run [Orca](https://github.com/stablyai/orca) as an editor in an Eclipse Che workspace, with [OpenCode](https://opencode.ai) and optional KServe model discovery. Orca provides a browser environment for coding agents and parallel Git worktrees.
 
 This repository contains the container recipe, devfile, and scripts that build an image and create a workspace in your user namespace.
 
@@ -27,11 +27,11 @@ Orca advertises its own WebSocket address in the pairing URL it hands to the bro
 
 ## Requirements
 
-- An OpenShift cluster with Dev Spaces installed.
+- An OpenShift cluster with Eclipse Che installed.
 - Bash and `podman` on your machine. The deploy script uses Podman.
 - Python 3 and the dependency in `requirements.txt` for devfile rendering.
 - The `oc` CLI, logged in to the cluster.
-- Permission to create DevWorkspaces, DevWorkspaceTemplates, Services, and Routes in your Dev Spaces user namespace.
+- Permission to create DevWorkspaces, DevWorkspaceTemplates, Services, and Routes in your Che user workspace namespace.
 - A registry you can push to and that workspace pods can pull from. A public image is convenient on shared clusters where you cannot configure pull credentials.
 
 Cluster-wide editor registration additionally needs admin permissions. Google Vertex AI is optional and requires a Google Cloud project with access to your chosen models.
@@ -51,18 +51,18 @@ cp config.env.example config.env
 ${EDITOR:-vi} config.env
 ```
 
-Set `NAMESPACE` to your Dev Spaces user namespace and `ORCA_IMAGE` to a registry you can push to:
+Set `NAMESPACE` to your Che user workspace namespace and `ORCA_IMAGE` to a registry you can push to:
 
 ```env
-NAMESPACE=rh-ee-yourname-dev
-ORCA_IMAGE=quay.io/my-org/devspaces-orca-editor:latest
+NAMESPACE=che-user-workspaces
+ORCA_IMAGE=quay.io/my-org/che-orca:latest
 ```
 
-Run `oc project -q` to check your current namespace. The scripts require an explicit `NAMESPACE`; the namespace hosting the Dev Spaces operator is usually different from your user namespace.
+Run `oc project -q` to check your current namespace. The scripts require an explicit `NAMESPACE`; the namespace hosting the Che operator is usually different from your user namespace.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `NAMESPACE` | yes | Dev Spaces user namespace to deploy into |
+| `NAMESPACE` | yes | Che user workspace namespace to deploy into |
 | `ORCA_IMAGE` | yes | Image to build and push |
 | `REDHAT_AI_NAMESPACE` | no | Namespace to scan for KServe InferenceServices. Empty skips discovery. |
 | `GOOGLE_CLOUD_PROJECT` | no | Only for Google Vertex AI |
@@ -86,7 +86,7 @@ URL:      https://<route-host>/#<pairing-fragment>
 Shell:    oc exec -it <pod> -c orca-runtime -n <namespace> -- bash
 ```
 
-Keep that output private — the URL is a credential.
+Keep that output private. The URL is a credential.
 
 The workspace starts with no source repository. Clone your code under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace, template, Service, and Route.
 
@@ -98,9 +98,9 @@ oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- cat /orca/entrypoint-logs.txt
 
 ## Access and credentials
 
-The direct Route bypasses the Che gateway and terminates TLS, redirecting HTTP to HTTPS. Access is controlled by Orca's own browser pairing, not by Dev Spaces authentication.
+The direct Route bypasses the Che gateway and terminates TLS, redirecting HTTP to HTTPS. Orca's browser pairing controls access to that Route.
 
-Orca writes a readiness JSON stream to `/projects/.devspaces-orca/ready.jsonl` (mode `600`, inside a `700` directory). To retrieve the pairing URL later:
+Orca writes a readiness JSON stream to `/projects/.che-orca/ready.jsonl` with mode `600`, inside a directory with mode `700`. To retrieve the pairing URL later:
 
 ```bash
 source ./config.env
@@ -108,7 +108,7 @@ POD=$(oc get pods -n "$NAMESPACE" \
   -l controller.devfile.io/devworkspace_name=orca-workspace \
   --no-headers | awk '$3 != "Completed" && $1 !~ /cleanup/ {print $1; exit}')
 oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- \
-  cat /projects/.devspaces-orca/ready.jsonl
+  cat /projects/.che-orca/ready.jsonl
 ```
 
 Use the full `pairing.webClientUrl` from the `orca_server_ready` record, **including the URL fragment**. Keep pairing URLs, logs, and generated model configuration out of issues and pull requests.
@@ -121,11 +121,11 @@ On startup the entrypoint looks for KServe InferenceServices in `REDHAT_AI_NAMES
 
 In Orca, open a terminal in your repository, run `opencode`, and pick a model with `/models`. The entrypoint exports `OPENCODE_CONFIG=/projects/opencode.json`, so discovery also applies inside cloned repositories and worktrees under `/projects`. OpenCode merges that config with your user and project settings.
 
-Unlike some other Dev Spaces agent integrations, this one keeps OpenCode's default tools and permissions, since Orca drives OpenCode as an interactive agent rather than as an editor backend.
+Orca runs OpenCode as an interactive agent and keeps its default tools and permissions.
 
 ### Other providers
 
-OpenCode supports external providers — see [OpenCode's provider documentation](https://opencode.ai/docs/providers/). Configure them from an Orca terminal or with `oc exec -it`.
+See [OpenCode's provider documentation](https://opencode.ai/docs/providers/) for external providers. Configure them from an Orca terminal or with `oc exec -it`.
 
 For Google Vertex AI, set `GOOGLE_CLOUD_PROJECT` and `CLOUD_ML_REGION` in `config.env`, then authenticate from the workspace:
 
@@ -138,11 +138,11 @@ Other coding agent CLIs can be installed and authenticated in the workspace term
 
 ### Persistent state
 
-Everything that should survive a workspace restart lives under `/projects/.devspaces-orca`, symlinked into `$HOME`:
+Everything that should survive a workspace restart lives under `/projects/.che-orca`, symlinked into `$HOME`:
 
 | Path | Contents |
 | --- | --- |
-| `orca-home/` | Orca user data (`ORCA_USER_DATA`) |
+| `orca-home/` | Orca user data, set by `ORCA_USER_DATA` |
 | `opencode-config/`, `opencode-share/`, `opencode-state/` | OpenCode configuration, data, and state |
 | `gcloud/` | Google Cloud SDK configuration and credentials |
 | `ready.jsonl` | Readiness stream, including the pairing URL |
@@ -157,13 +157,13 @@ Teardown removes the workspace, editor template, direct Service, and Route in `N
 
 ## Cluster-wide registration
 
-`deploy.sh` creates a template in your own namespace. To add Orca to the dashboard editor picker for everyone, set `NAMESPACE` to the Dev Spaces installation namespace and run:
+`deploy.sh` creates a template in your own namespace. To add Orca to the dashboard editor picker for everyone, set `NAMESPACE` to the Che installation namespace and run:
 
 ```bash
 make register
 ```
 
-Remove it with `make unregister`. Manual registration also needs `ORCA_PAIRING_ADDRESS` set to a reachable `wss://` endpoint — `deploy.sh` calculates that address automatically, but the `make` target cannot. Restore your user namespace in `config.env` before deploying or tearing down a workspace.
+Remove it with `make unregister`. Manual registration also needs `ORCA_PAIRING_ADDRESS` set to a reachable `wss://` endpoint. The deployment script calculates that address automatically. Restore your user namespace in `config.env` before deploying or tearing down a workspace.
 
 ## Versions and limitations
 
@@ -173,7 +173,7 @@ Orca v1.4.219 needs [`web-client.patch`](web-client.patch) to serve its web clie
 
 The image targets `linux/amd64`. The builder stage runs on the host architecture (`--platform=$BUILDPLATFORM`) and cross-compiles the `orcad` runtime, because esbuild fails under amd64 emulation on ARM machines.
 
-The Che gateway can terminate the server; the entrypoint restarts it after two seconds. Exit code 78 is treated as a configuration error and is not retried.
+The entrypoint restarts the server after two seconds if it exits. Exit code 78 is treated as a configuration error and is not retried.
 
 ## Repository layout
 

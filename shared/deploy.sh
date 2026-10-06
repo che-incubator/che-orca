@@ -8,7 +8,7 @@ load_config() {
   fi
   # shellcheck source=/dev/null
   source "$REPO_ROOT/config.env"
-  NAMESPACE="${NAMESPACE:?Set NAMESPACE to your Dev Spaces user namespace in config.env}"
+  NAMESPACE="${NAMESPACE:?Set NAMESPACE to your Che user workspace namespace in config.env}"
 }
 
 build_and_push_image() {
