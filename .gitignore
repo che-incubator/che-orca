@@ -1,0 +1,15 @@
+node_modules/
+__pycache__/
+.venv/
+.env
+.env.*
+!.env.example
+config.env
+config.env.*
+!config.env.example
+*.log
+*-rendered.yaml
+.devspaces-*/
+**/.devspaces-*/
+entrypoint-logs.txt
+opencode.json

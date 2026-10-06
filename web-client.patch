@@ -1,0 +1,24 @@
+--- a/src/main/orcad/orcad-entry.ts
++++ b/src/main/orcad/orcad-entry.ts
+@@ -14,6 +14,7 @@
+ import { setAppEnvironment, type AppEnvironment } from '../../shared/app-environment'
+ import { setSecretStore, type SecretStore } from '../../shared/secret-store'
+ import type { ServeReadiness } from '../server/serve-readiness'
++import { HEADLESS_RUNTIME_WINDOW_ID } from '../../shared/runtime-types'
+ import { resolveOrcadInstallRoot, resolveOrcadPath, resolveUserDataPath } from './orcad-app-paths'
+ import { describeOrcadBindExposure, resolveOrcadBindHost } from './orcad-bind-address'
+ import {
+@@ -292,3 +293,6 @@
++  // A standalone server has no renderer to publish its initial terminal graph.
++  runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })
++
+   const bindHost = resolveOrcadBindHost(options.bind)
+   rpc = new OrcaRuntimeRpcServer({
+     runtime,
+@@ -300,5 +304,6 @@
+     // restart after its first client paired.
+     pinnedBindHost: bindHost,
++    webClientRoot: process.env.ORCA_WEB_ROOT,
+     ...(options.port !== undefined ? { wsPort: options.port, preferPinnedWsPort: true } : {})
+   })
+   await rpc.start()

@@ -1,0 +1,80 @@
+schemaVersion: 2.2.2
+
+metadata:
+  name: stablyai/orca-editor/latest
+  displayName: Orca + OpenCode
+  description: Web development environment for coding agents and parallel worktrees
+  attributes:
+    publisher: stablyai
+    version: latest
+    title: Orca coding agents and worktrees
+    firstPublicationDate: '2026-10-03'
+    repository: https://github.com/stablyai/orca
+
+commands:
+  - id: init-orca-injector
+    apply:
+      component: orca-injector
+  - id: init-orca-start
+    exec:
+      component: orca-runtime
+      commandLine: >-
+        nohup /orca/entrypoint.sh > /orca/entrypoint-logs.txt 2>&1 &
+
+events:
+  preStart:
+    - init-orca-injector
+  postStart:
+    - init-orca-start
+
+components:
+  - name: orca-injector
+    container:
+      image: ${ORCA_IMAGE}
+      command:
+        - /entrypoint-init-container.sh
+      volumeMounts:
+        - name: orca
+          path: /orca
+      memoryLimit: 512Mi
+      memoryRequest: 32Mi
+      cpuLimit: 500m
+      cpuRequest: 30m
+
+  - name: orca-runtime
+    container:
+      image: quay.io/devfile/universal-developer-image:latest
+      env:
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "${GOOGLE_CLOUD_PROJECT}"
+        - name: CLOUD_ML_REGION
+          value: "${CLOUD_ML_REGION}"
+        - name: ORCA_PAIRING_ADDRESS
+          value: "${ORCA_PAIRING_ADDRESS}"
+        - name: REDHAT_AI_NAMESPACE
+          value: "${REDHAT_AI_NAMESPACE}"
+      volumeMounts:
+        - name: orca
+          path: /orca
+      memoryLimit: 2048Mi
+      memoryRequest: 512Mi
+      cpuLimit: 1000m
+      cpuRequest: 100m
+      endpoints:
+        - name: orca
+          targetPort: 6768
+          exposure: public
+          protocol: https
+          secure: true
+          attributes:
+            type: main
+            cookiesAuthEnabled: true
+            discoverable: false
+            urlRewriteSupported: true
+    attributes:
+      app.kubernetes.io/component: orca-runtime
+      app.kubernetes.io/part-of: orca.eclipse.org
+      controller.devfile.io/container-contribution: true
+
+  - name: orca
+    volume: {}
