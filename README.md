@@ -1,5 +1,7 @@
 # Orca for Eclipse Che
 
+[![Container Repository on Quay](https://quay.io/repository/che-incubator/che-orca/status "Container Repository on Quay")](https://quay.io/repository/che-incubator/che-orca)
+
 Run [Orca](https://github.com/stablyai/orca) as an editor in an Eclipse Che workspace, with [OpenCode](https://opencode.ai) and optional KServe model discovery. Orca provides a browser environment for coding agents and parallel Git worktrees.
 
 This repository contains the container recipe, devfile, and scripts that build an image and create a workspace in your user namespace.
@@ -171,7 +173,9 @@ The Containerfile pins Orca to v1.4.219 and OpenCode to 1.18.34. Update those ve
 
 Orca v1.4.219 needs [`web-client.patch`](web-client.patch) to serve its web client (`webClientRoot`) and to initialize the terminal graph, which a standalone server has no renderer to publish.
 
-The image targets `linux/amd64`. The builder stage runs on the host architecture (`--platform=$BUILDPLATFORM`) and cross-compiles the `orcad` runtime, because esbuild fails under amd64 emulation on ARM machines.
+The published image targets `linux/amd64` and `linux/arm64`; `make build` builds `linux/amd64` only. The builder stage runs on the host architecture (`--platform=$BUILDPLATFORM`) and cross-compiles the `orcad` runtime, because esbuild fails under amd64 emulation on ARM machines.
+
+`s390x` and `ppc64le` are not supported. The `orcad` runtime is a Bun-compiled binary and Bun publishes x64 and arm64 builds only, so the architecture cannot be built from this source regardless of base image availability. The Google Cloud SDK download has the same limitation.
 
 The entrypoint restarts the server after two seconds if it exits. Exit code 78 is treated as a configuration error and is not retried.
 
