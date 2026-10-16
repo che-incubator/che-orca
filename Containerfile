@@ -74,4 +74,6 @@ RUN chgrp -R 0 /opt/app-root /opt/orca && \
 
 USER 1001
 
-CMD ["/orca/entrypoint.sh"]
+# Idle like the universal developer image. When orca-runtime runs as its own
+# container, the postStart command starts /orca/entrypoint.sh.
+CMD ["tail", "-f", "/dev/null"]
