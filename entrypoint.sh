@@ -40,14 +40,57 @@ register_projects() {
   done
 }
 
-# Wait for the readiness line, register projects, then keep draining so orcad
-# never writes to a closed pipe.
+# Install Orca's skills and status hooks for the agents on PATH. They live in the
+# home directory, which Che recreates with the container, so a marker in /tmp
+# skips the work when only orcad restarts. mkdir claims it atomically, and a
+# failure releases it so the next orcad start retries.
+configure_agents() {
+  local marker=/tmp/che-orca-agents-configured agents=() ok=true
+  mkdir "$marker" 2>/dev/null || return
+  command -v claude >/dev/null && agents+=(claude-code)
+  command -v codex >/dev/null && agents+=(codex)
+  command -v opencode >/dev/null && agents+=(opencode)
+  if [ "${#agents[@]}" -eq 0 ]; then
+    echo "No claude, codex, or opencode on PATH; skipping Orca skills"
+    rmdir "$marker"
+    return
+  fi
+  if orca skills install --all --agent "$(IFS=,; echo "${agents[*]}")" >/dev/null 2>&1; then
+    echo "Installed Orca skills for ${agents[*]}"
+  else
+    echo "Could not install Orca skills for ${agents[*]}"
+    ok=false
+  fi
+  # orcad writes hook files only when the setting changes, and it defaults to on.
+  # OpenCode gets its plugin from Orca's terminals instead.
+  if command -v claude >/dev/null || command -v codex >/dev/null; then
+    if orca agent hooks off >/dev/null && orca agent hooks on >/dev/null; then
+      echo "Installed Orca agent status hooks"
+    else
+      echo "Could not install Orca agent status hooks"
+      ok=false
+    fi
+  fi
+  "$ok" || rmdir "$marker"
+}
+
+setup_orca() {
+  register_projects
+  if [ -n "${DEVWORKSPACE_NAME:-}" ]; then
+    orca host name --name "$DEVWORKSPACE_NAME" >/dev/null ||
+      echo "Could not set the Orca host name"
+  fi
+  configure_agents
+}
+
+# Wait for the readiness line, then set up Orca in the background while this
+# keeps draining output, so orcad never blocks on or writes to a closed pipe.
 register_when_ready() {
   local line
   while IFS= read -r line; do
     case "$line" in
       *'"type":"orca_server_ready"'*)
-        register_projects
+        setup_orca &
         break
         ;;
     esac

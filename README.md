@@ -122,6 +122,10 @@ On every start, the entrypoint runs `orca repo add` for each Git repository dire
 orca repo add --path /projects/my-repo
 ```
 
+### Agents
+
+On start, the entrypoint also sets the Orca host name to the workspace name. For each of `claude`, `codex`, and `opencode` on `PATH`, it installs Orca's skills with `orca skills install`, which needs `npx` and network access. For Claude and Codex it also writes Orca's agent status hooks. OpenCode gets its status plugin from Orca's terminals instead. Skills and hooks live in the home directory, so this runs again whenever the container restarts. Results appear in `/orca/entrypoint-logs.txt`.
+
 ### Persistent state
 
 Everything that should survive a workspace restart lives under `/projects/.che-orca`:
