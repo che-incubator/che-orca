@@ -21,7 +21,7 @@ This is an experiment. A direct OpenShift Route works around Che gateway routing
 The devfile adds two components to the workspace:
 
 - **`orca-injector`** runs as a `preStart` init container. It copies the Orca standalone runtime, prebuilt web client, and Orca CLI out of the image and onto the shared `orca` volume mounted at `/orca`.
-- **`orca-runtime`** is a container contribution to the standard [universal developer image](https://quay.io/devfile/universal-developer-image). A `postStart` command launches `/orca/entrypoint.sh`, which starts `orcad` on port 6768 and serves the web client from `/orca/web`.
+- **`orca-runtime`** is a container contribution. Che merges it into the workspace's tool container, or runs it in the Orca image when the workspace has none. A `postStart` command launches `/orca/entrypoint.sh`, which starts `orcad` on port 6768 and serves the web client from `/orca/web`.
 
 Keeping the runtime on a volume means your workspace keeps the full universal developer image toolchain; Orca is injected alongside it rather than replacing it.
 
@@ -79,7 +79,7 @@ Shell:    oc exec -it <pod> -c orca-runtime -n <namespace> -- bash
 
 Keep that output private. The URL is a credential.
 
-The workspace starts with no source repository. Clone your code under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace, template, Service, and Route.
+The workspace starts with no source repository. To start Orca on a repository, create the workspace from the Che dashboard instead (see [Cluster-wide registration](#cluster-wide-registration)), or clone under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace, template, Service, and Route.
 
 If the script times out waiting for the pairing URL, check the startup log:
 
@@ -114,6 +114,18 @@ orca --help
 
 The CLI finds the running server through `ORCA_USER_DATA_PATH`, which defaults to `/projects/.che-orca/orca-home`.
 
+### Projects
+
+On every start, the entrypoint runs `orca repo add` for each Git repository directly under `/projects`, so repositories Che cloned when it created the workspace are already open in Orca. Repositories you clone later can be added from the Orca UI or with:
+
+```bash
+orca repo add --path /projects/my-repo
+```
+
+### Agents
+
+On start, the entrypoint also sets the Orca host name to the workspace name. For each of `claude`, `codex`, and `opencode` on `PATH`, it installs Orca's skills with `orca skills install`, which needs `npx` and network access. For Claude and Codex it also writes Orca's agent status hooks. OpenCode gets its status plugin from Orca's terminals instead. Skills and hooks live in the home directory, so this runs again whenever the container restarts. Results appear in `/orca/entrypoint-logs.txt`.
+
 ### Persistent state
 
 Everything that should survive a workspace restart lives under `/projects/.che-orca`:
@@ -137,6 +149,12 @@ Teardown removes the workspace, editor template, direct Service, and Route in `N
 
 ```bash
 make register
+```
+
+Users can then pick Orca on the dashboard's Create Workspace page and enter a repository under Import from Git. Che clones the repository into `/projects` and Orca registers it on start. The same choice works as a link:
+
+```text
+https://<che-host>/#https://github.com/my-org/my-repo?che-editor=stablyai/orca-editor/latest
 ```
 
 Remove it with `make unregister`. Manual registration also needs `ORCA_PAIRING_ADDRESS` set to a reachable `wss://` endpoint. The deployment script calculates that address automatically. Restore your user namespace in `config.env` before deploying or tearing down a workspace.

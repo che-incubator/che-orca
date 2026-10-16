@@ -43,7 +43,7 @@ components:
 
   - name: orca-runtime
     container:
-      image: quay.io/devfile/universal-developer-image:latest
+      image: ${ORCA_IMAGE}
       env:
         - name: ORCA_PAIRING_ADDRESS
           value: "${ORCA_PAIRING_ADDRESS}"
