@@ -79,7 +79,7 @@ Shell:    oc exec -it <pod> -c orca-runtime -n <namespace> -- bash
 
 Keep that output private. The URL is a credential.
 
-The workspace starts with no source repository. Clone your code under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace, template, Service, and Route.
+The workspace starts with no source repository. To start Orca on a repository, create the workspace from the Che dashboard instead (see [Cluster-wide registration](#cluster-wide-registration)), or clone under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace, template, Service, and Route.
 
 If the script times out waiting for the pairing URL, check the startup log:
 
@@ -114,6 +114,14 @@ orca --help
 
 The CLI finds the running server through `ORCA_USER_DATA_PATH`, which defaults to `/projects/.che-orca/orca-home`.
 
+### Projects
+
+On every start, the entrypoint runs `orca repo add` for each Git repository directly under `/projects`, so repositories Che cloned when it created the workspace are already open in Orca. Repositories you clone later can be added from the Orca UI or with:
+
+```bash
+orca repo add --path /projects/my-repo
+```
+
 ### Persistent state
 
 Everything that should survive a workspace restart lives under `/projects/.che-orca`:
@@ -137,6 +145,12 @@ Teardown removes the workspace, editor template, direct Service, and Route in `N
 
 ```bash
 make register
+```
+
+Users can then pick Orca on the dashboard's Create Workspace page and enter a repository under Import from Git. Che clones the repository into `/projects` and Orca registers it on start. The same choice works as a link:
+
+```text
+https://<che-host>/#https://github.com/my-org/my-repo?che-editor=stablyai/orca-editor/latest
 ```
 
 Remove it with `make unregister`. Manual registration also needs `ORCA_PAIRING_ADDRESS` set to a reachable `wss://` endpoint. The deployment script calculates that address automatically. Restore your user namespace in `config.env` before deploying or tearing down a workspace.

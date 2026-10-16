@@ -25,9 +25,40 @@ if [ -n "$ORCA_PAIRING_ADDRESS" ]; then
   ARGS+=(--pairing-address "$ORCA_PAIRING_ADDRESS")
 fi
 
+# Register the Git repositories Che cloned under /projects. orcad prints its
+# readiness line only after the CLI socket and orca-runtime.json are in place.
+# Orca returns the existing entry for a known path, so this is safe on every start.
+register_projects() {
+  local dir
+  for dir in "${PROJECTS_ROOT:-/projects}"/*/; do
+    [ -d "${dir}.git" ] || continue
+    if orca repo add --path "${dir%/}" >/dev/null; then
+      echo "Registered ${dir%/} in Orca"
+    else
+      echo "Could not register ${dir%/} in Orca"
+    fi
+  done
+}
+
+# Wait for the readiness line, register projects, then keep draining so orcad
+# never writes to a closed pipe.
+register_when_ready() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      *'"type":"orca_server_ready"'*)
+        register_projects
+        break
+        ;;
+    esac
+  done
+  cat >/dev/null
+}
+
 # Capture the readiness JSON, including the browser pairing URL, for deploy.sh.
 while true; do
-  /orca/runtime/bun-runtime /orca/runtime/orcad.js "${ARGS[@]}" > "$PERSIST/ready.jsonl" &
+  /orca/runtime/bun-runtime /orca/runtime/orcad.js "${ARGS[@]}" \
+    > >(tee "$PERSIST/ready.jsonl" | register_when_ready) &
   ORCA_PID=$!
   wait "$ORCA_PID"
   STATUS=$?
