@@ -67,6 +67,7 @@ COPY orca.sh /opt/orca/bin/orca
 COPY shared/runtime.sh /usr/local/bin/shared-runtime.sh
 COPY shared/bashrc.sh /usr/local/bin/shared-bashrc.sh
 COPY entrypoint.sh /usr/local/bin/orca-entrypoint.sh
+COPY pairing-page.js /usr/local/bin/orca-pairing-page.js
 COPY entrypoint-init-container.sh /entrypoint-init-container.sh
 
 # Orca's skills tell agents to run orca-ide outside Orca's terminals. orcad does not

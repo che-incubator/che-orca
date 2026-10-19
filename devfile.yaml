@@ -44,9 +44,6 @@ components:
   - name: orca-runtime
     container:
       image: ${ORCA_IMAGE}
-      env:
-        - name: ORCA_PAIRING_ADDRESS
-          value: "${ORCA_PAIRING_ADDRESS}"
       volumeMounts:
         - name: orca
           path: /orca
@@ -57,6 +54,7 @@ components:
       endpoints:
         - name: orca
           targetPort: 6768
+          path: /web-index.html
           exposure: public
           protocol: https
           secure: true

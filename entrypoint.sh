@@ -30,15 +30,29 @@ done
 
 export ORCA_USER_DATA="$PERSIST/orca-home"
 export ORCA_USER_DATA_PATH="$ORCA_USER_DATA"
-export ORCA_WEB_ROOT=/orca/web
 export ORCA_VERSION=1.4.219
+
+# orcad listens on loopback, where only Che's gateway reaches it, after the Che login.
+# The web client is served from a copy whose page pairs with orcad on load. It lives in
+# /tmp because the page holds the pairing token. Until orcad is ready, the copy serves
+# the unmodified page.
+WEB_ROOT=/tmp/che-orca-web
+rm -rf "$WEB_ROOT" && mkdir "$WEB_ROOT" || exit 1
+ln -s /orca/web/* "$WEB_ROOT/" || exit 1
+export ORCA_WEB_ROOT="$WEB_ROOT"
 
 cd "${PROJECTS_ROOT:-/projects}" || exit 1
 
-ARGS=(--bind 0.0.0.0 --port 6768 --json)
-if [ -n "$ORCA_PAIRING_ADDRESS" ]; then
-  ARGS+=(--pairing-address "$ORCA_PAIRING_ADDRESS")
-fi
+ARGS=(--port 6768 --json)
+
+write_pairing_page() {
+  if printf '%s\n' "$1" | /orca/runtime/bun-runtime /orca/pairing-page.js \
+    /orca/web/web-index.html "$WEB_ROOT/web-index.html"; then
+    echo "Wrote the Orca pairing page"
+  else
+    echo "Could not write the Orca pairing page"
+  fi
+}
 
 # Register the Git repositories Che cloned under /projects. orcad prints its
 # readiness line only after the CLI socket and orca-runtime.json are in place.
@@ -88,6 +102,7 @@ register_when_ready() {
   while IFS= read -r line; do
     case "$line" in
       *'"type":"orca_server_ready"'*)
+        write_pairing_page "$line"
         setup_orca &
         break
         ;;
@@ -96,7 +111,7 @@ register_when_ready() {
   cat >/dev/null
 }
 
-# Capture the readiness JSON, including the browser pairing URL, for deploy.sh.
+# Capture the readiness JSON for deploy.sh. It includes the pairing URL, so keep it private.
 while true; do
   /orca/runtime/bun-runtime /orca/runtime/orcad.js "${ARGS[@]}" \
     > >(tee "$PERSIST/ready.jsonl" | register_when_ready) &
@@ -104,7 +119,7 @@ while true; do
   wait "$ORCA_PID"
   STATUS=$?
   if [ "$STATUS" -eq 78 ]; then
-    echo "Orca configuration error. Check the data directory and pairing address."
+    echo "Orca configuration error. Check the data directory."
     exit "$STATUS"
   fi
   echo "Orca exited ($STATUS), restarting in 2s..."

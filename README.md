@@ -6,14 +6,14 @@ Run [Orca](https://github.com/stablyai/orca) as an editor in an Eclipse Che work
 
 This repository contains the container recipe, devfile, and scripts that build an image and create a workspace in your user namespace.
 
-This is an experiment. A direct OpenShift Route works around Che gateway routing limitations, and upstream Orca changes can break the integration. It is a community project with no production support commitment.
+This is an experiment, and upstream Orca changes can break the integration. It is a community project with no production support commitment.
 
 | | |
 | --- | --- |
 | Upstream | [stablyai/orca](https://github.com/stablyai/orca) v1.4.219 |
 | CLI | `orca` |
 | Port | 6768 |
-| Authentication | Browser pairing URL |
+| Authentication | Che login |
 | Client | Browser |
 
 ## How it works
@@ -21,11 +21,9 @@ This is an experiment. A direct OpenShift Route works around Che gateway routing
 The devfile adds two components to the workspace:
 
 - **`orca-injector`** runs as a `preStart` init container. It copies the Orca standalone runtime, prebuilt web client, and Orca CLI out of the image and onto the shared `orca` volume mounted at `/orca`.
-- **`orca-runtime`** is a container contribution. Che merges it into the workspace's tool container, or runs it in the Orca image when the workspace has none. A `postStart` command launches `/orca/entrypoint.sh`, which starts `orcad` on port 6768 and serves the web client from `/orca/web`.
+- **`orca-runtime`** is a container contribution. Che merges it into the workspace's tool container, or runs it in the Orca image when the workspace has none. A `postStart` command launches `/orca/entrypoint.sh`, which starts `orcad` on port 6768 and serves the web client from `/orca/web`. The workspace URL opens the web client like any other Che editor.
 
 Keeping the runtime on a volume means your workspace keeps the full universal developer image toolchain; Orca is injected alongside it rather than replacing it.
-
-Orca advertises its own WebSocket address in the pairing URL it hands to the browser, so `deploy.sh` creates the direct Route *before* starting the workspace and passes the resulting `wss://` hostname in as `ORCA_PAIRING_ADDRESS`.
 
 ## Requirements
 
@@ -33,7 +31,7 @@ Orca advertises its own WebSocket address in the pairing URL it hands to the bro
 - Bash and `podman` on your machine. The deploy script uses Podman.
 - Python 3 for devfile rendering.
 - The `oc` CLI, logged in to the cluster.
-- Permission to create DevWorkspaces, DevWorkspaceTemplates, Services, and Routes in your Che user workspace namespace.
+- Permission to create DevWorkspaces and DevWorkspaceTemplates in your Che user workspace namespace.
 - A registry you can push to and that workspace pods can pull from. A public image is convenient on shared clusters where you cannot configure pull credentials.
 
 Cluster-wide editor registration additionally needs admin permissions.
@@ -58,7 +56,6 @@ Run `oc project -q` to check your current namespace. The scripts require an expl
 | --- | --- | --- |
 | `NAMESPACE` | yes | Che user workspace namespace to deploy into |
 | `ORCA_IMAGE` | yes | Image to build and push |
-| `ORCA_PAIRING_ADDRESS` | no | Only for manual registration; `deploy.sh` sets this itself |
 
 `config.env` is a local, gitignored Bash file.
 
@@ -68,20 +65,20 @@ Run `oc project -q` to check your current namespace. The scripts require an expl
 ./deploy.sh
 ```
 
-The script builds and pushes a `linux/amd64` image, creates the direct Service and Route, renders the devfile into a `DevWorkspaceTemplate`, creates the `orca-workspace` DevWorkspace, waits for the pod, and then prints the pairing URL:
+The script builds and pushes a `linux/amd64` image, renders the devfile into a `DevWorkspaceTemplate`, creates the `orca-workspace` DevWorkspace, waits for Orca to start, and then prints the workspace URL:
 
 ```
 === Orca is ready ===
 
-URL:      https://<route-host>/#<pairing-fragment>
+URL:      https://<che-host>/<user>/orca-workspace/6768/web-index.html
 Shell:    oc exec -it <pod> -c orca-runtime -n <namespace> -- bash
 ```
 
-Keep that output private. The URL is a credential.
+The workspace also appears on the Che dashboard, which opens the same URL.
 
-The workspace starts with no source repository. To start Orca on a repository, create the workspace from the Che dashboard instead (see [Cluster-wide registration](#cluster-wide-registration)), or clone under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace, template, Service, and Route.
+The workspace starts with no source repository. To start Orca on a repository, create the workspace from the Che dashboard instead (see [Cluster-wide registration](#cluster-wide-registration)), or clone under `/projects` after connecting. Resource names are fixed, so rerunning the script updates the same workspace and template.
 
-If the script times out waiting for the pairing URL, check the startup log:
+If the script times out waiting for Orca, check the startup log:
 
 ```bash
 oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- cat /orca/entrypoint-logs.txt
@@ -89,9 +86,11 @@ oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- cat /orca/entrypoint-logs.txt
 
 ## Access and credentials
 
-The direct Route bypasses the Che gateway and terminates TLS, redirecting HTTP to HTTPS. Orca's browser pairing controls access to that Route.
+`orcad` listens on `127.0.0.1`, so only the workspace's Che gateway reaches it, after the Che login. The page the gateway serves pairs the web client with `orcad` on load, so you don't handle a pairing URL. The entrypoint writes that page to `/tmp/che-orca-web` after `orcad` starts, because it holds the pairing token. The client then connects its WebSocket through the same gateway URL.
 
-Orca writes a readiness JSON stream to `/projects/.che-orca/ready.jsonl` with mode `600`, inside a directory with mode `700`. To retrieve the pairing URL later:
+The client stores the pairing in the browser's local storage. Che serves every workspace from the same origin, so Orca workspaces open in the same browser share that storage and Orca's browser settings. Opening one workspace pairs it again, which replaces the stored pairing of another, but tabs that are already open stay connected.
+
+Orca also writes a readiness JSON stream to `/projects/.che-orca/ready.jsonl` with mode `600`, inside a directory with mode `700`. Its pairing URL advertises `ws://127.0.0.1:6768`, for clients outside the browser that reach `orcad` through `oc port-forward`:
 
 ```bash
 source ./config.env
@@ -102,7 +101,7 @@ oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- \
   cat /projects/.che-orca/ready.jsonl
 ```
 
-Use the full `pairing.webClientUrl` from the `orca_server_ready` record, **including the URL fragment**. Keep pairing URLs and logs out of issues and pull requests.
+The pairing URL in the `orca_server_ready` record is a credential. Keep it and the logs out of issues and pull requests.
 
 ## Orca CLI
 
@@ -135,7 +134,7 @@ Everything that should survive a workspace restart lives under `/projects/.che-o
 | Path | Contents |
 | --- | --- |
 | `orca-home/` | Orca user data, set by `ORCA_USER_DATA` |
-| `ready.jsonl` | Readiness stream, including the pairing URL |
+| `ready.jsonl` | Readiness stream, including a pairing URL |
 
 ## Remove a deployment
 
@@ -143,7 +142,7 @@ Everything that should survive a workspace restart lives under `/projects/.che-o
 ./teardown.sh
 ```
 
-Teardown removes the workspace, editor template, direct Service, and Route in `NAMESPACE`. Storage retention follows your cluster's DevWorkspace policy, so back up anything you need from `/projects` first.
+Teardown removes the workspace and editor template in `NAMESPACE`. Storage retention follows your cluster's DevWorkspace policy, so back up anything you need from `/projects` first.
 
 ## Cluster-wide registration
 
@@ -159,7 +158,7 @@ Users can then pick Orca on the dashboard's Create Workspace page and enter a re
 https://<che-host>/#https://github.com/my-org/my-repo?che-editor=stablyai/orca-editor/latest
 ```
 
-Remove it with `make unregister`. Manual registration also needs `ORCA_PAIRING_ADDRESS` set to a reachable `wss://` endpoint. The deployment script calculates that address automatically. Restore your user namespace in `config.env` before deploying or tearing down a workspace.
+Remove it with `make unregister`. Restore your user namespace in `config.env` before deploying or tearing down a workspace.
 
 ## Versions and limitations
 
@@ -178,10 +177,11 @@ The entrypoint restarts the server after two seconds if it exits. Exit code 78 i
 ```
 Containerfile                   multi-stage build: Orca runtime, web client, CLI
 devfile.yaml                    injector and runtime components, preStart/postStart events
-deploy.sh                       build, push, Route, template, workspace, pairing URL
-teardown.sh                     remove workspace, template, Service, Route
+deploy.sh                       build, push, template, workspace, workspace URL
+teardown.sh                     remove workspace and template
 entrypoint-init-container.sh    copies the runtime and CLI onto the /orca volume
 entrypoint.sh                   persistent state, starts orcad on 6768
+pairing-page.js                 writes the web client page that pairs on load
 orca.sh                         Orca CLI launcher, installed as /orca/bin/orca and orca-ide
 web-client.patch                upstream patch applied during the build
 shared/                         deploy helpers, devfile renderer, runtime setup

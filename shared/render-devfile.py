@@ -9,9 +9,6 @@ import tempfile
 
 
 IMAGE_VARIABLES = {"ORCA_IMAGE"}
-DEFAULTS = {
-    "ORCA_PAIRING_ADDRESS": "",
-}
 PLACEHOLDER = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z][\w-]*):")
 # Devfile keys that are not part of a DevWorkspaceTemplate spec.
@@ -25,8 +22,6 @@ def substitute(text, environment):
             if not environment.get(name):
                 raise ValueError(f"Set {name} in config.env")
             return environment[name]
-        if name in DEFAULTS:
-            return environment.get(name) or DEFAULTS[name]
         return match[0]
     return PLACEHOLDER.sub(replace, text)
 

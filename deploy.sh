@@ -13,50 +13,35 @@ echo "=== Deploying Orca to namespace: $NAMESPACE ==="
 # Step 1: Build and push
 build_and_push_image "$ORCA_IMAGE" "$REPO_ROOT"
 
-# Step 2: Create the direct route before startup so pairing advertises its hostname.
-create_direct_route "orca-direct" 6768 controller.devfile.io/devworkspace_name "orca-workspace"
-
-ROUTE_HOST=$(oc get route orca-direct -n "$NAMESPACE" -o jsonpath='{.spec.host}')
-ORCA_PAIRING_ADDRESS="wss://${ROUTE_HOST}/"
-
-# Step 3: DevWorkspaceTemplate
+# Step 2: DevWorkspaceTemplate
 create_editor_template "$REPO_ROOT/devfile.yaml" "orca-editor"
 
-# Step 4: DevWorkspace
+# Step 3: DevWorkspace
 create_workspace "orca-workspace" "orca-editor"
 
-# Step 5: Wait for the workspace pod
+# Step 4: Wait for the workspace pod
 wait_for_workspace "orca-workspace" 180s
 
-# Step 6: Read the browser pairing URL from Orca's readiness contract.
+# Step 5: Wait for orcad's readiness line. The page pairs on load once it appears.
 echo "Waiting for Orca to start..."
-WEB_URL=""
+READY=""
 for _ in $(seq 1 60); do
-  WEB_URL=$(oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- node -e '
-    const fs = require("fs");
-    const lines = fs.readFileSync("/projects/.che-orca/ready.jsonl", "utf8").split("\n");
-    for (const line of lines) {
-      let ready;
-      try { ready = JSON.parse(line); } catch { continue; }
-      if (ready.type === "orca_server_ready" && ready.schemaVersion === 1 &&
-          ready.pairing?.available && ready.pairing.webClientUrl) {
-        process.stdout.write(ready.pairing.webClientUrl);
-        process.exit(0);
-      }
-    }
-    process.exit(1);
-  ' 2>/dev/null || true)
-  [ -n "$WEB_URL" ] && break
+  if oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- \
+    grep -q '"type":"orca_server_ready"' /projects/.che-orca/ready.jsonl 2>/dev/null; then
+    READY=1
+    break
+  fi
   sleep 3
 done
-if [ -z "$WEB_URL" ]; then
-  echo "Orca did not publish a browser pairing URL. Check the startup logs:"
+if [ -z "$READY" ]; then
+  echo "Orca did not start. Check the startup logs:"
   echo "  oc exec $POD -c orca-runtime -n $NAMESPACE -- cat /orca/entrypoint-logs.txt"
   exit 1
 fi
 
+URL=$(oc get devworkspace orca-workspace -n "$NAMESPACE" -o jsonpath='{.status.mainUrl}')
 echo ""
 echo "=== Orca is ready ==="
 echo ""
-echo "URL:      ${WEB_URL}"
+echo "URL:      ${URL}"
 echo "Shell:    oc exec -it $POD -c orca-runtime -n $NAMESPACE -- bash"

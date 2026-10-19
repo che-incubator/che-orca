@@ -20,7 +20,7 @@ build_and_push_image() {
 }
 
 render_devfile() (
-  export ORCA_IMAGE ORCA_PAIRING_ADDRESS
+  export ORCA_IMAGE
   python3 "$REPO_ROOT/shared/render-devfile.py" "$@"
 )
 
@@ -94,43 +94,10 @@ wait_for_workspace() {
   echo "Pod ready: $POD"
 }
 
-create_direct_route() {
-  local route="$1" port="$2" selector_key="$3" selector_value="$4"
-  echo "Creating direct route..."
-  cat <<EOF | oc apply -n "$NAMESPACE" -f -
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${route}
-spec:
-  selector:
-    ${selector_key}: ${selector_value}
-  ports:
-    - port: ${port}
-      targetPort: ${port}
----
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: ${route}
-spec:
-  to:
-    kind: Service
-    name: ${route}
-  port:
-    targetPort: ${port}
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-EOF
-}
-
 teardown_editor() {
-  local label="$1" workspace="$2" editor="$3" route="$4"
+  local label="$1" workspace="$2" editor="$3"
   echo "=== Tearing down $label from namespace: $NAMESPACE ==="
   oc delete devworkspace "$workspace" -n "$NAMESPACE" --ignore-not-found
   oc delete devworkspacetemplate "$editor" -n "$NAMESPACE" --ignore-not-found
-  oc delete service "$route" -n "$NAMESPACE" --ignore-not-found
-  oc delete route "$route" -n "$NAMESPACE" --ignore-not-found
   echo "Done."
 }

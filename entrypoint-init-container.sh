@@ -2,6 +2,7 @@
 set -e
 
 cp /usr/local/bin/orca-entrypoint.sh /orca/entrypoint.sh
+cp /usr/local/bin/orca-pairing-page.js /orca/pairing-page.js
 cp /usr/local/bin/shared-runtime.sh /orca/runtime.sh
 cp /usr/local/bin/shared-bashrc.sh /orca/bashrc.sh
 cp -r /opt/orca/runtime /orca/runtime
