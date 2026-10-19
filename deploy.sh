@@ -22,19 +22,21 @@ create_workspace "orca-workspace" "orca-editor"
 # Step 4: Wait for the workspace pod
 wait_for_workspace "orca-workspace" 180s
 
-# Step 5: Wait for orcad's readiness line. The page pairs on load once it appears.
+# Step 5: Wait for the pairing page. The entrypoint starts the web root with a link to
+# the unmodified page and replaces it with the pairing page only after orcad is ready.
 echo "Waiting for Orca to start..."
 READY=""
 for _ in $(seq 1 60); do
   if oc exec "$POD" -c orca-runtime -n "$NAMESPACE" -- \
-    grep -q '"type":"orca_server_ready"' /projects/.che-orca/ready.jsonl 2>/dev/null; then
+    sh -c 'test -f /tmp/che-orca-web/web-index.html && test ! -L /tmp/che-orca-web/web-index.html' \
+    2>/dev/null; then
     READY=1
     break
   fi
   sleep 3
 done
 if [ -z "$READY" ]; then
-  echo "Orca did not start. Check the startup logs:"
+  echo "Orca did not write its pairing page. Check the startup logs:"
   echo "  oc exec $POD -c orca-runtime -n $NAMESPACE -- cat /orca/entrypoint-logs.txt"
   exit 1
 fi
