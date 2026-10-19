@@ -106,7 +106,7 @@ Use the full `pairing.webClientUrl` from the `orca_server_ready` record, **inclu
 
 ## Orca CLI
 
-The image includes the Orca CLI from the same release as the runtime. It runs on the Bun runtime that ships with `orcad`, so it does not depend on the workspace's Node.js version. `/orca/bashrc.sh` adds `/orca/bin` to `PATH`, so it works in any interactive shell:
+The image includes the Orca CLI from the same release as the runtime. It runs on the Bun runtime that ships with `orcad`, so it does not depend on the workspace's Node.js version. `/orca/bashrc.sh` adds `/orca/bin` to `PATH`, so it works in any interactive shell. It is also available as `orca-ide`, the name Orca's skills tell agents to use outside Orca's terminals, where `orca` could be the GNOME screen reader:
 
 ```bash
 orca --help
@@ -124,7 +124,9 @@ orca repo add --path /projects/my-repo
 
 ### Agents
 
-On start, the entrypoint also sets the Orca host name to the workspace name. For each of `claude`, `codex`, and `opencode` on `PATH`, it installs Orca's skills with `orca skills install`, which needs `npx` and network access. For Claude and Codex it also writes Orca's agent status hooks. OpenCode gets its status plugin from Orca's terminals instead. Skills and hooks live in the home directory, so this runs again whenever the container restarts. Results appear in `/orca/entrypoint-logs.txt`.
+The image ships Orca's agent skills for the pinned release, such as `orca-cli`, which tells agents about the CLI and its browser. Each skill is a short stub that loads the guide for the installed Orca version with `orca skills get`. On start, the entrypoint links them into `~/.claude/skills` for Claude Code and `~/.agents/skills` for OpenCode and Codex, and leaves skills you installed there under the same name alone. This needs no network access, unlike `orca skills install`, which fetches the skills with `npx` from GitHub.
+
+The entrypoint adds `/injected-tools/bin`, where Che's AI tool injectors put `claude` and `opencode`, to `PATH`, so terminals that Orca opens can run them. It also sets the Orca host name to the workspace name. When `claude` or `codex` is on `PATH`, it writes Orca's agent status hooks. OpenCode gets its status plugin from Orca's terminals instead. Skill links and hooks live in the home directory, so this runs again whenever the container restarts. Results appear in `/orca/entrypoint-logs.txt`.
 
 ### Persistent state
 
@@ -180,7 +182,7 @@ deploy.sh                       build, push, Route, template, workspace, pairing
 teardown.sh                     remove workspace, template, Service, Route
 entrypoint-init-container.sh    copies the runtime and CLI onto the /orca volume
 entrypoint.sh                   persistent state, starts orcad on 6768
-orca.sh                         Orca CLI launcher, installed as /orca/bin/orca
+orca.sh                         Orca CLI launcher, installed as /orca/bin/orca and orca-ide
 web-client.patch                upstream patch applied during the build
 shared/                         deploy helpers, devfile renderer, runtime setup
 config.env.example              documented local configuration

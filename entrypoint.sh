@@ -4,7 +4,9 @@
 source /orca/runtime.sh
 setup_runtime /orca/bashrc.sh || exit 1
 
-export PATH="/orca/bin:${PATH}"
+# Che's AI tool injectors install claude and opencode here, but only login shells add
+# it to PATH. configure_agent_hooks and orcad's terminals need to find them.
+export PATH="/orca/bin:/injected-tools/bin:${PATH}"
 export SHELL=/bin/bash
 
 PERSIST="${PROJECTS_ROOT:-/projects}/.che-orca"
@@ -12,6 +14,19 @@ mkdir -p "$PERSIST/orca-home" || exit 1
 chmod 700 "$PERSIST" || exit 1
 touch "$PERSIST/ready.jsonl" || exit 1
 chmod 600 "$PERSIST/ready.jsonl" || exit 1
+
+# Orca's skills tell agents about the CLI, its browser, and Orca's other features. The image
+# ships them for this Orca version. Claude Code reads ~/.claude/skills; OpenCode and Codex read
+# ~/.agents/skills. Leave a skill the user installed there alone.
+for skills_dir in "$HOME/.claude/skills" "$HOME/.agents/skills"; do
+  for skill in /orca/skills/*/; do
+    link="$skills_dir/$(basename "$skill")"
+    if [ -L "$link" ] || [ ! -e "$link" ]; then
+      { mkdir -p "$skills_dir" && ln -sfn "${skill%/}" "$link"; } ||
+        echo "Could not link Orca skill $link"
+    fi
+  done
+done
 
 export ORCA_USER_DATA="$PERSIST/orca-home"
 export ORCA_USER_DATA_PATH="$ORCA_USER_DATA"
@@ -40,38 +55,21 @@ register_projects() {
   done
 }
 
-# Install Orca's skills and status hooks for the agents on PATH. They live in the
-# home directory, which Che recreates with the container, so a marker in /tmp
-# skips the work when only orcad restarts. mkdir claims it atomically, and a
-# failure releases it so the next orcad start retries.
-configure_agents() {
-  local marker=/tmp/che-orca-agents-configured agents=() ok=true
+# Install Orca's status hooks for Claude and Codex. They live in the home directory,
+# which Che recreates with the container, so a marker in /tmp skips the work when
+# only orcad restarts. mkdir claims it atomically, and a failure releases it so the
+# next orcad start retries. OpenCode gets its plugin from Orca's terminals instead.
+configure_agent_hooks() {
+  local marker=/tmp/che-orca-agents-configured
+  command -v claude >/dev/null || command -v codex >/dev/null || return
   mkdir "$marker" 2>/dev/null || return
-  command -v claude >/dev/null && agents+=(claude-code)
-  command -v codex >/dev/null && agents+=(codex)
-  command -v opencode >/dev/null && agents+=(opencode)
-  if [ "${#agents[@]}" -eq 0 ]; then
-    echo "No claude, codex, or opencode on PATH; skipping Orca skills"
-    rmdir "$marker"
-    return
-  fi
-  if orca skills install --all --agent "$(IFS=,; echo "${agents[*]}")" >/dev/null 2>&1; then
-    echo "Installed Orca skills for ${agents[*]}"
-  else
-    echo "Could not install Orca skills for ${agents[*]}"
-    ok=false
-  fi
   # orcad writes hook files only when the setting changes, and it defaults to on.
-  # OpenCode gets its plugin from Orca's terminals instead.
-  if command -v claude >/dev/null || command -v codex >/dev/null; then
-    if orca agent hooks off >/dev/null && orca agent hooks on >/dev/null; then
-      echo "Installed Orca agent status hooks"
-    else
-      echo "Could not install Orca agent status hooks"
-      ok=false
-    fi
+  if orca agent hooks off >/dev/null && orca agent hooks on >/dev/null; then
+    echo "Installed Orca agent status hooks"
+  else
+    echo "Could not install Orca agent status hooks"
+    rmdir "$marker"
   fi
-  "$ok" || rmdir "$marker"
 }
 
 setup_orca() {
@@ -80,7 +78,7 @@ setup_orca() {
     orca host name --name "$DEVWORKSPACE_NAME" >/dev/null ||
       echo "Could not set the Orca host name"
   fi
-  configure_agents
+  configure_agent_hooks
 }
 
 # Wait for the readiness line, then set up Orca in the background while this

@@ -62,13 +62,17 @@ COPY --from=builder /src/orca/out/orcad /opt/orca/runtime
 COPY --from=builder /src/orca/out/web /opt/orca/web
 COPY --from=builder /src/orca/LICENSE /opt/orca/LICENSE
 COPY --from=builder /opt/orca-cli /opt/orca/cli
+COPY --from=builder /src/orca/skills /opt/orca/skills
 COPY orca.sh /opt/orca/bin/orca
 COPY shared/runtime.sh /usr/local/bin/shared-runtime.sh
 COPY shared/bashrc.sh /usr/local/bin/shared-bashrc.sh
 COPY entrypoint.sh /usr/local/bin/orca-entrypoint.sh
 COPY entrypoint-init-container.sh /entrypoint-init-container.sh
 
-RUN chgrp -R 0 /opt/app-root /opt/orca && \
+# Orca's skills tell agents to run orca-ide outside Orca's terminals. orcad does not
+# install that name, so point it at the same launcher.
+RUN ln -s orca /opt/orca/bin/orca-ide && \
+    chgrp -R 0 /opt/app-root /opt/orca && \
     chmod -R g=u /opt/app-root /opt/orca && \
     chmod g=u /etc/passwd
 
