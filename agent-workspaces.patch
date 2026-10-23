@@ -1,0 +1,465 @@
+diff --git a/src/main/runtime/rpc/methods/index.ts b/src/main/runtime/rpc/methods/index.ts
+index cbf6e0d8e..270839dbb 100644
+--- a/src/main/runtime/rpc/methods/index.ts
++++ b/src/main/runtime/rpc/methods/index.ts
+@@ -1,3 +1,4 @@
++import { CHE_WORKSPACE_METHODS } from '../../../che/che-workspaces'
+ import { STATUS_METHODS } from './status'
+ import { AI_VAULT_METHODS } from './ai-vault'
+ import { AUTOMATION_METHODS } from './automations'
+@@ -54,6 +55,7 @@ import { AGENT_LAUNCH_METHODS } from './agent-launch'
+ // auditing the security boundary or wiring new CLI commands.
+ export const ALL_RPC_METHODS = [
+   ...STATUS_METHODS,
++  ...CHE_WORKSPACE_METHODS,
+   ...AGENT_HOOK_METHODS,
+   ...AI_VAULT_METHODS,
+   ...ARTIFACT_METHODS,
+diff --git a/src/main/runtime/rpc/rpc-params-type-parity.ts b/src/main/runtime/rpc/rpc-params-type-parity.ts
+index 263a7fe38..72339bed4 100644
+--- a/src/main/runtime/rpc/rpc-params-type-parity.ts
++++ b/src/main/runtime/rpc/rpc-params-type-parity.ts
+@@ -8,7 +8,8 @@ import type { ALL_RPC_METHODS } from './methods'
+ type RegisteredMethod = (typeof ALL_RPC_METHODS)[number]
+ 
+ // These schemas reach into src/main and have no shared catalog entry.
+-type UncataloguedMethod = 'emulator.install' | 'orchestration.send' | 'orchestration.taskUpdate'
++type UncataloguedMethod = 'emulator.install' | 'orchestration.send' | 'orchestration.taskUpdate' |
++  (typeof import('../../che/che-workspaces').CHE_WORKSPACE_METHODS)[number]['name']
+ 
+ type IsAny<T> = 0 extends 1 & T ? true : false
+ 
+diff --git a/src/main/runtime/runtime-rpc/runtime-rpc-long-poll.ts b/src/main/runtime/runtime-rpc/runtime-rpc-long-poll.ts
+index 02d842254..312ca3f66 100644
+--- a/src/main/runtime/runtime-rpc/runtime-rpc-long-poll.ts
++++ b/src/main/runtime/runtime-rpc/runtime-rpc-long-poll.ts
+@@ -23,6 +23,9 @@ export function classifyRuntimeLongPoll(request: RpcRequest): RuntimeLongPollCla
+   // Worker start waits for readiness and then verifies the submitted prompt;
+   // the complete operation can run for 90–110s. Keep every local transport
+   // (Unix sockets and Windows named pipes) alive for that long poll.
++  if (['cheWorkspace.provision', 'cheWorkspace.suspendWorkspace', 'cheWorkspace.resumeWorkspace'].includes(request.method)) {
++    return 'wait'
++  }
+   if (request.method === 'orchestration.workerStart') {
+     return 'wait'
+   }
+diff --git a/src/renderer/src/components/new-workspace/run-target-options.ts b/src/renderer/src/components/new-workspace/run-target-options.ts
+index b95d12883..39ef22d43 100644
+--- a/src/renderer/src/components/new-workspace/run-target-options.ts
++++ b/src/renderer/src/components/new-workspace/run-target-options.ts
+@@ -46,6 +46,7 @@ export function getRecipeDestroyLabel(recipe: EphemeralVmRecipeOption): string {
+ 
+ /** One line under a recipe name: what it runs and whether it tears down. */
+ export function getRecipeDetail(recipe: EphemeralVmRecipeOption): string {
++  if (recipe.id === 'che-devworkspace') return 'Isolated workspace with persistent storage'
+   return `${getRecipeCommandDisplay(recipe.create)} · ${getRecipeDestroyLabel(recipe)}`
+ }
+ 
+diff --git a/src/renderer/src/hooks/composer-state/runtime-target-selection.ts b/src/renderer/src/hooks/composer-state/runtime-target-selection.ts
+index 7d6fe1c4a..eb7ce61f2 100644
+--- a/src/renderer/src/hooks/composer-state/runtime-target-selection.ts
++++ b/src/renderer/src/hooks/composer-state/runtime-target-selection.ts
+@@ -209,7 +209,8 @@ export function useComposerRuntimeTargetSelection(input: ComposerRuntimeTargetSe
+   const selectedRecipeRepoConnectionId = selectedRepo?.connectionId ?? null
+ 
+   // Why: gate recipe probing on the experimental toggle, since discovery can surface setup errors for a hidden feature.
+-  const ephemeralVmsEnabled = settings?.experimentalEphemeralVms === true
++  const ephemeralVmsEnabled = settings?.experimentalEphemeralVms === true ||
++    (window as Window & { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ === true
+ 
+   const {
+     recipes: ephemeralVmRecipes,
+diff --git a/src/renderer/src/hooks/useEphemeralVmRecipeOptions.ts b/src/renderer/src/hooks/useEphemeralVmRecipeOptions.ts
+index 3cf47e7a7..9f95d30d4 100644
+--- a/src/renderer/src/hooks/useEphemeralVmRecipeOptions.ts
++++ b/src/renderer/src/hooks/useEphemeralVmRecipeOptions.ts
+@@ -27,7 +27,8 @@ export function useEphemeralVmRecipeOptions(args: EphemeralVmRecipeOptionsArgs):
+     Boolean(args.repoId) &&
+     args.repoIsGit &&
+     !args.repoConnectionId &&
+-    args.repoExecutionHostId === LOCAL_EXECUTION_HOST_ID &&
++    (args.repoExecutionHostId === LOCAL_EXECUTION_HOST_ID ||
++      (typeof window !== 'undefined' && (window as Window & { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__)) &&
+     !args.projectGroupTarget
+ 
+   const load = useCallback(
+@@ -54,7 +55,7 @@ export function useEphemeralVmRecipeOptions(args: EphemeralVmRecipeOptionsArgs):
+               return args.initialRecipeId &&
+                 nextRecipes.some((recipe) => recipe.id === args.initialRecipeId)
+                 ? args.initialRecipeId
+-                : null
++                : nextRecipes.find((recipe) => recipe.id === 'che-devworkspace')?.id ?? null
+             }
+             return current && nextRecipes.some((recipe) => recipe.id === current) ? current : null
+           })
+diff --git a/src/renderer/src/web/preload-api/web-runtime-environments-api.ts b/src/renderer/src/web/preload-api/web-runtime-environments-api.ts
+index 8e9b0ecc2..80f1f7d86 100644
+--- a/src/renderer/src/web/preload-api/web-runtime-environments-api.ts
++++ b/src/renderer/src/web/preload-api/web-runtime-environments-api.ts
+@@ -1,3 +1,6 @@
++import { refreshCheEnvironments } from './web-che-workspaces-api'
++import { cheEnvironments } from './web-che-environments'
++import { closeCheRuntimeClients } from './web-runtime-session'
+ import type { PreloadApi } from '../../../../preload/api-types'
+ import { parseHostAccessLink } from '../../../../shared/remote-pairing-address'
+ import { verifyRemotePairingRuntimeStatus } from '../../../../shared/remote-pairing-verification'
+@@ -36,13 +39,16 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
+     getStatusSnapshots: async () => readWebRuntimeStatusSnapshots(),
+     list: async () => {
+       const environment = requireActiveEnvironmentOrNull()
+-      return environment ? [redactStoredWebRuntimeEnvironment(environment)] : []
++      if (!environment) return []
++      try { await refreshCheEnvironments() } catch { /* Keep saved host identity available while offline. */ }
++      return [environment, ...cheEnvironments.values()].map(redactStoredWebRuntimeEnvironment)
+     },
+     addFromPairingCode: async ({ name, pairingCode }) => {
+       const offer = parseWebPairingInput(pairingCode)
+       if (!offer) {
+         throw new Error('Invalid Orca pairing code.')
+       }
++      cheEnvironments.clear()
+       const previousEnvironment = webRuntimeState.activeEnvironment
+       closeActiveRuntimeClients()
+       webRuntimeState.activeEnvironment = createStoredWebRuntimeEnvironment({
+@@ -148,6 +154,7 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
+           )
+         }
+       }
++      cheEnvironments.clear()
+       manuallyDisconnectedEnvironmentIds.clear()
+       closeActiveRuntimeClients()
+       webRuntimeState.activeEnvironment = nextEnvironment
+@@ -167,6 +174,10 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
+       redactStoredWebRuntimeEnvironment(resolveEnvironment(selector)),
+     remove: async ({ selector }) => {
+       const environment = resolveEnvironment(selector)
++      if (cheEnvironments.has(environment.id)) {
++        // The controlling server owns this record; deleting it here would not stick.
++        throw new Error('Use environment cleanup to delete a Che DevWorkspace.')
++      }
+       if (webRuntimeState.activeEnvironment?.id === environment.id) {
+         removeActiveRuntimeEnvironment()
+       }
+@@ -175,6 +186,10 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
+     },
+     disconnect: async ({ selector }) => {
+       const environment = resolveEnvironment(selector)
++      if (cheEnvironments.has(environment.id)) {
++        manuallyDisconnectedEnvironmentIds.add(environment.id)
++        closeCheRuntimeClients(environment.id)
++      }
+       if (webRuntimeState.activeEnvironment?.id === environment.id) {
+         manuallyDisconnectedEnvironmentIds.add(environment.id)
+         disconnectActiveRuntimeEnvironment()
+@@ -184,7 +199,8 @@ export function createRuntimeEnvironmentsApi(): NonNullable<
+     connect: ({ selector, timeoutMs }) => {
+       const environment = resolveEnvironment(selector)
+       manuallyDisconnectedEnvironmentIds.delete(environment.id)
+-      closeActiveRuntimeClients()
++      if (cheEnvironments.has(environment.id)) closeCheRuntimeClients(environment.id)
++      else closeActiveRuntimeClients()
+       return callEnvironmentEnvelope<RuntimeStatus>(
+         environment.id,
+         'status.get',
+diff --git a/src/renderer/src/web/preload-api/web-runtime-session.ts b/src/renderer/src/web/preload-api/web-runtime-session.ts
+index 15b6cb63e..e95e73d03 100644
+--- a/src/renderer/src/web/preload-api/web-runtime-session.ts
++++ b/src/renderer/src/web/preload-api/web-runtime-session.ts
+@@ -1,3 +1,4 @@
++import { cheEnvironments } from './web-che-environments'
+ import type {
+   RuntimeHostStatusSnapshot,
+   RuntimeHostStatusResponse
+@@ -44,8 +45,8 @@ export function subscribeWebRuntimeStatus(
+   }
+ }
+ export function readWebRuntimeStatusSnapshots(): RuntimeHostStatusSnapshot[] {
+-  const snapshot = webRuntimeState.activeClient?.statusOwner?.read()
+-  return snapshot ? [snapshot] : []
++  return [webRuntimeState.activeClient, ...[...cheClients.values()].map((entry) => entry.client)]
++    .flatMap((client) => { const snapshot = client?.statusOwner?.read(); return snapshot ? [snapshot] : [] })
+ }
+ export async function observeWebRuntimeStatus(
+   selector: string,
+@@ -55,7 +56,8 @@ export async function observeWebRuntimeStatus(
+   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
+     return manuallyDisconnectedResponse(environment)
+   }
+-  const existing = webRuntimeState.activeClient?.statusOwner
++  const existing = (cheClients.get(environment.id)?.client ??
++    (webRuntimeState.activeClientEnvironmentId === environment.id ? webRuntimeState.activeClient : null))?.statusOwner
+   if (existing) {
+     return existing.refresh({ timeoutMs, observeOnly: true })
+   }
+@@ -80,12 +82,40 @@ export function invalidateRuntimeWorktreeCaches(): void {
+   webRuntimeState.cachedDetectedWorktrees = null
+ }
+ 
++// Child runtimes stay connected alongside the controller, keyed by environment id.
++const cheClients = new Map<string, { client: WebRuntimeClient; pairingRevision: number }>()
++
++export function closeCheRuntimeClients(environmentId?: string): void {
++  for (const [id, { client }] of cheClients) {
++    if (environmentId && id !== environmentId) continue
++    client.close()
++    cheClients.delete(id)
++  }
++}
++
+ export function getClientForEnvironment(
+   environment: StoredWebRuntimeEnvironment
+ ): WebRuntimeClient {
+   if (manuallyDisconnectedEnvironmentIds.has(environment.id)) {
+     throw new Error('runtime_manually_disconnected')
+   }
++  if (cheEnvironments.has(environment.id)) {
++    // Wake refreshes pairing credentials, which bumps the revision.
++    const pairingRevision = environment.pairingRevision ?? environment.createdAt
++    const existing = cheClients.get(environment.id)
++    if (existing?.pairingRevision === pairingRevision) return existing.client
++    closeCheRuntimeClients(environment.id)
++    const client = new WebRuntimeClient(getPreferredWebPairingOffer(environment), {
++      status: {
++        environmentId: environment.id,
++        pairingRevision,
++        publish: (snapshot) => { for (const listener of statusListeners) listener(snapshot) },
++        verified: (response) => updateEnvironmentFromResponse(environment, response)
++      }
++    })
++    cheClients.set(environment.id, { client, pairingRevision })
++    return client
++  }
+   if (
+     !webRuntimeState.activeClient ||
+     webRuntimeState.activeClientEnvironmentId !== environment.id
+@@ -109,6 +139,7 @@ export function getClientForEnvironment(
+ }
+ 
+ export function closeActiveRuntimeClients(): void {
++  closeCheRuntimeClients()
+   webRuntimeState.activeClient?.close()
+   webRuntimeState.activeClient = null
+   webRuntimeState.activeClientEnvironmentId = null
+@@ -121,6 +152,7 @@ export function disconnectActiveRuntimeEnvironment(): void {
+ 
+ export function removeActiveRuntimeEnvironment(): void {
+   disconnectActiveRuntimeEnvironment()
++  cheEnvironments.clear()
+   clearStoredWebRuntimeEnvironment()
+   webRuntimeState.activeEnvironment = null
+ }
+@@ -150,6 +182,8 @@ export function resolveEnvironment(selector: string): StoredWebRuntimeEnvironmen
+   if (environment.compatibleEnvironmentIds?.includes(selector)) {
+     return environment
+   }
++  const child = [...cheEnvironments.values()].find((entry) => entry.id === selector || entry.name === selector)
++  if (child) return child
+   throw new Error(`Unknown Orca runtime environment: ${selector}`)
+ }
+ 
+@@ -179,6 +213,10 @@ export function updateEnvironmentFromResponse(
+   response: RuntimeRpcResponse<unknown>
+ ): void {
+   if (webRuntimeState.activeEnvironment?.id !== environment.id) {
++    const child = cheEnvironments.get(environment.id)
++    if (child && response.ok) {
++      cheEnvironments.set(child.id, { ...child, runtimeId: response._meta.runtimeId })
++    }
+     return
+   }
+   const runtimeId = response.ok ? response._meta.runtimeId : (response._meta?.runtimeId ?? null)
+diff --git a/src/renderer/src/web/web-preload-api.ts b/src/renderer/src/web/web-preload-api.ts
+index 17f77ded8..817445301 100644
+--- a/src/renderer/src/web/web-preload-api.ts
++++ b/src/renderer/src/web/web-preload-api.ts
+@@ -1,6 +1,7 @@
+ import type { PreloadApi } from '../../../preload/api-types'
+ import type { StatsSummary } from '../../../shared/process-stats-types'
+ import { createWebE2EApi } from './preload-api/web-e2e-api'
++import { createWebCheWorkspacesApi } from './preload-api/web-che-workspaces-api'
+ import {
+   createClaudeAccountsApi,
+   createCodexAccountsApi,
+@@ -79,6 +80,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
+     runtime: createWebRuntimeApi(),
+     nativeChat: createWebNativeChatApi(),
+     runtimeEnvironments: createRuntimeEnvironmentsApi(),
++    ephemeralVm: createWebCheWorkspacesApi(),
+     repos: createReposApi(),
+     worktrees: createWorktreesApi(),
+     fs: createFileApi(),
+diff --git a/src/shared/execution-host-registry.ts b/src/shared/execution-host-registry.ts
+--- a/src/shared/execution-host-registry.ts
++++ b/src/shared/execution-host-registry.ts
+@@ -140,7 +140,12 @@
+   // (named) registration is authoritative for the label — runtime envs are
+   // seeded with a friendly name before the id-labeled status/focus/repo
+   // fallbacks run, so keep the existing label on a health-only upgrade.
+-  hosts.set(entry.id, { ...entry, label: existing.label, source: existing.source ?? entry.source })
++  hosts.set(entry.id, {
++    ...entry,
++    label: existing.label,
++    detail: existing.detail,
++    source: existing.source ?? entry.source
++  })
+ }
+ 
+ function addRuntimeHost(
+@@ -175,7 +180,7 @@
+     id: hostId,
+     kind: 'runtime',
+     label,
+-    detail: 'Orca server',
++    detail: source === 'ephemeral-vm' ? 'Agent environment' : 'Orca server',
+     health: controlHealth ?? runtimeHealth(status, compatibility, remoteControl),
+     compatibility: compatibility ?? undefined,
+     capabilities: metadata?.capabilities,
+diff --git a/src/renderer/src/components/sidebar/sidebar-host-options.ts b/src/renderer/src/components/sidebar/sidebar-host-options.ts
+--- a/src/renderer/src/components/sidebar/sidebar-host-options.ts
++++ b/src/renderer/src/components/sidebar/sidebar-host-options.ts
+@@ -20,6 +20,7 @@
+   id: ExecutionHostId
+   label: string
+   detail: string
++  source?: PublicKnownRuntimeEnvironment['source']
+   kind: 'local' | 'ssh' | 'runtime'
+   health: ExecutionHostHealth
+   presence: 'local' | 'configured' | 'project' | 'active'
+@@ -44,7 +45,7 @@
+   // Why: live per-environment runtime status lets the registry surface compat
+   // verdicts and blocked health in the sidebar without re-probing servers.
+   runtimeStatusByEnvironmentId?: ReadonlyMap<string, RuntimeEnvironmentStatus>
+-  runtimeEnvironments?: readonly Pick<PublicKnownRuntimeEnvironment, 'id' | 'name'>[]
++  runtimeEnvironments?: readonly Pick<PublicKnownRuntimeEnvironment, 'id' | 'name' | 'source'>[]
+   // Why: per-host display-label overrides rename hosts everywhere the sidebar
+   // options feed (host headers, scope picker, focus menu).
+   hostLabelOverrides?: ReadonlyMap<ExecutionHostId, string>
+diff --git a/src/renderer/src/components/sidebar/sidebar-host-options.test.ts b/src/renderer/src/components/sidebar/sidebar-host-options.test.ts
+--- a/src/renderer/src/components/sidebar/sidebar-host-options.test.ts
++++ b/src/renderer/src/components/sidebar/sidebar-host-options.test.ts
+@@ -100,6 +100,20 @@
+     expect(hosts.find((host) => host.id.startsWith('runtime:'))).toMatchObject({
+       label: 'dev box',
+       detail: 'Orca server'
++    })
++  })
++
++  it('labels managed runtimes as agent environments without changing their identity', () => {
++    const hosts = buildSidebarHostOptions({
++      repos: [],
++      sshTargetLabels: new Map(),
++      settings: {},
++      runtimeEnvironments: [{ id: 'agent-1', name: 'My agent', source: 'ephemeral-vm' }]
++    })
++    expect(hosts.find((host) => host.id.startsWith('runtime:'))).toMatchObject({
++      label: 'My agent',
++      detail: 'Agent environment',
++      kind: 'runtime'
+     })
+   })
+ 
+diff --git a/src/renderer/src/components/settings/runtime-servers-connect-section.tsx b/src/renderer/src/components/settings/runtime-servers-connect-section.tsx
+--- a/src/renderer/src/components/settings/runtime-servers-connect-section.tsx
++++ b/src/renderer/src/components/settings/runtime-servers-connect-section.tsx
+@@ -160,25 +160,45 @@
+           </div>
+         ) : (
+           <div className="divide-y divide-border/50">
+-            {environments.map((environment) => (
+-              <RuntimeServerRow
+-                key={environment.id}
+-                environment={environment}
+-                details={detailsByEnvironmentId[environment.id]}
+-                isActive={activeRuntimeEnvironmentId === environment.id}
+-                remoteUpdate={remoteServerUpdates.get(environment.id)}
+-                remoteServerUpdatesRunning={remoteServerUpdatesRunning}
+-                connecting={connectingId === environment.id}
+-                switching={switchingValue === environment.id}
+-                disconnecting={disconnectingId === environment.id}
+-                removing={removingId === environment.id}
+-                isBusy={isBusy}
+-                onOpenUpdate={onOpenUpdateDialog}
+-                onConnect={onConnect}
+-                onDisconnect={onDisconnect}
+-                onRemove={onRemove}
+-              />
+-            ))}
++            {[
++              {
++                label: 'Orca servers',
++                entries: environments.filter((env) => env.source !== 'ephemeral-vm')
++              },
++              {
++                label: 'Agent environments',
++                entries: environments.filter((env) => env.source === 'ephemeral-vm')
++              }
++            ]
++              .filter((group) => group.entries.length > 0)
++              .map((group) => (
++                <section key={group.label} aria-label={group.label}>
++                  <h3 className="px-3 py-2 text-xs font-medium text-muted-foreground">
++                    {group.label}
++                  </h3>
++                  <div className="divide-y divide-border/50">
++                    {group.entries.map((environment) => (
++                      <RuntimeServerRow
++                        key={environment.id}
++                        environment={environment}
++                        details={detailsByEnvironmentId[environment.id]}
++                        isActive={activeRuntimeEnvironmentId === environment.id}
++                        remoteUpdate={remoteServerUpdates.get(environment.id)}
++                        remoteServerUpdatesRunning={remoteServerUpdatesRunning}
++                        connecting={connectingId === environment.id}
++                        switching={switchingValue === environment.id}
++                        disconnecting={disconnectingId === environment.id}
++                        removing={removingId === environment.id}
++                        isBusy={isBusy}
++                        onOpenUpdate={onOpenUpdateDialog}
++                        onConnect={onConnect}
++                        onDisconnect={onDisconnect}
++                        onRemove={onRemove}
++                      />
++                    ))}
++                  </div>
++                </section>
++              ))}
+           </div>
+         )}
+       </div>
+diff --git a/src/renderer/src/components/sidebar/worktree-list/listing/use-section-rows.ts b/src/renderer/src/components/sidebar/worktree-list/listing/use-section-rows.ts
+--- a/src/renderer/src/components/sidebar/worktree-list/listing/use-section-rows.ts
++++ b/src/renderer/src/components/sidebar/worktree-list/listing/use-section-rows.ts
+@@ -1,4 +1,5 @@
+ import { useCallback, useMemo, useState } from 'react'
++import { hideAgentPrimaryWorktrees } from '../../agent-primary-workspaces'
+ import { useShallow } from 'zustand/react/shallow'
+ import { useAppStore } from '@/store'
+ import type { AppState } from '@/store/types'
+@@ -69,11 +70,15 @@
+ // Builds the full sidebar row model: grouped worktree rows first, then the host-section
+ // tier wrapped around them.
+ export function useSidebarSectionRows(args: SectionRowsArgs) {
+-  const { repos, worktrees, repoMap, effectiveCollapsedGroups, defaultHostId } = args
++  const { repos, worktrees: allWorktrees, repoMap, effectiveCollapsedGroups, defaultHostId } = args
+   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
+   const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
+   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
+   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
++  const worktrees = useMemo(
++    () => hideAgentPrimaryWorktrees(allWorktrees, repoMap, runtimeEnvironments, defaultHostId),
++    [allWorktrees, repoMap, runtimeEnvironments, defaultHostId]
++  )
+   const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
+   const workspaceHostOrder = useAppStore((s) => s.workspaceHostOrder)
+   const setWorkspaceHostOrder = useAppStore((s) => s.setWorkspaceHostOrder)
+@@ -225,8 +230,8 @@
+         defaultHostId,
+         collapsedHostKeys: effectiveCollapsedGroups,
+         forceCollapseHosts: hostDragActive,
+-        // Why: projects/workspaces are the primary sidebar object; host sections are only an explicit host-filter view.
+-        preferProjectGrouping: true
++        // Managed agent runtimes get their own collapsible host sections.
++        preferProjectGrouping: !orderedHostOptions.some((host) => host.source === 'ephemeral-vm')
+       }),
+     [
+       args.visibleWorkspaceHostIds,
