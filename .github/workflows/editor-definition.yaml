@@ -1,0 +1,56 @@
+name: Editor definition
+
+# che-operator ships the dashboard's copy of devfile.yaml as
+# editors-definitions/che-orca-next.yaml, and its release flow freezes that copy
+# together with the che-orca:next image. che-operator can only take a change after
+# main publishes the matching image, so pull requests get a warning with the diff;
+# main and the weekly run fail until che-operator is updated.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - devfile.yaml
+      - shared/render-devfile.py
+      - .github/workflows/editor-definition.yaml
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Compare with che-operator
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compare devfile.yaml with che-operator's che-orca-next.yaml
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if make check-editor-definition 2> "$RUNNER_TEMP/drift.txt"; then
+            echo "che-operator's editor definition matches devfile.yaml."
+            exit 0
+          fi
+          cat "$RUNNER_TEMP/drift.txt"
+          {
+            echo '### che-operator editor definition differs from devfile.yaml'
+            echo
+            echo 'After this merges and `che-orca:next` is published, run `make editor-definition` and open a pull request against eclipse-che/che-operator.'
+            echo
+            echo '```diff'
+            cat "$RUNNER_TEMP/drift.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$EVENT" = pull_request ]; then
+            echo "::warning title=Editor definition::che-operator's che-orca-next.yaml differs from devfile.yaml. Update it after this merges."
+            exit 0
+          fi
+          exit 1
