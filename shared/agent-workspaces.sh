@@ -108,10 +108,20 @@ EOF
 
 teardown_agent_environment() {
   local controller="$1"
+  local installed project
+  # The ConfigMap records the installed namespace, so cleanup works after the feature is disabled.
+  installed=$(oc get configmap "$AGENT_ENVIRONMENT" -n "$NAMESPACE" --ignore-not-found \
+    -o jsonpath='{.data.ORCA_AGENT_NAMESPACE}') || return 1
+  if [ -n "$installed" ]; then
+    ORCA_AGENT_NAMESPACE="$installed"
+  elif agent_environments_enabled; then
+    resolve_agent_namespace || return 1
+  fi
   oc delete configmap "$AGENT_ENVIRONMENT" -n "$NAMESPACE" --ignore-not-found || return 1
-  agent_environments_enabled || return 0
-  resolve_agent_namespace || return 1
-  [ -n "$(oc get project "$ORCA_AGENT_NAMESPACE" --ignore-not-found -o name)" ] || return 0
+  [ -n "${ORCA_AGENT_NAMESPACE:-}" ] || return 0
+  # A failed lookup must stop teardown; only a missing project skips cleanup.
+  project=$(oc get project "$ORCA_AGENT_NAMESPACE" --ignore-not-found -o name) || return 1
+  [ -n "$project" ] || return 0
   oc delete devworkspaces,services,routes -n "$ORCA_AGENT_NAMESPACE" \
     -l "orca.eclipse.org/controller-namespace=$NAMESPACE,orca.eclipse.org/controller=$controller" \
     --ignore-not-found || return 1

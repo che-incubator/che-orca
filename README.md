@@ -151,7 +151,9 @@ workspace and child DevWorkspaces. Startup checks `opencode --version` before
 starting Orca. No download or installation is needed at workspace startup.
 Run `opencode` in a workspace terminal and select a free model to get started
 without credentials. After updating the image with `./deploy.sh`, restart existing
-workspaces to refresh their injected binaries.
+workspaces to refresh their injected binaries. Agent workspaces copy the editor
+definition when they are created, so restarting one keeps its old image when
+`ORCA_IMAGE` changes. Clean it up in Orca and create it again instead.
 
 The image includes the Orca CLI from the same release as the runtime. It runs on the Bun runtime that ships with `orcad`, so it does not depend on the workspace's Node.js version. `/orca/bashrc.sh` adds `/orca/bin` to `PATH`, so it works in any interactive shell. It is also available as `orca-ide`, the name Orca's skills tell agents to use outside Orca's terminals, where `orca` could be the GNOME screen reader:
 

@@ -22,7 +22,8 @@ export function createWebCheWorkspacesApi(): PreloadApi['ephemeralVm'] {
     doctor: async () => { throw new Error('Che environment configuration is managed by the deployment administrator.') },
     provision: async (args) => {
       const result = await call<Awaited<ReturnType<PreloadApi['ephemeralVm']['provision']>>>('provision', args)
-      if (result.ok) await refreshCheEnvironments()
+      // The workspace exists now; a failed refresh must not hide it from the caller.
+      if (result.ok) await refreshCheEnvironments().catch(() => undefined)
       return result
     },
     // Cancellation must not queue behind a full set of long-running creates.
@@ -43,7 +44,7 @@ export function createWebCheWorkspacesApi(): PreloadApi['ephemeralVm'] {
     resumeWorkspace: async (args) => {
       const row = await call<Awaited<ReturnType<PreloadApi['ephemeralVm']['resumeWorkspace']>>>('resumeWorkspace', args)
       if (row?.runtimeEnvironmentId) closeCheRuntimeClients(row.runtimeEnvironmentId)
-      await refreshCheEnvironments()
+      await refreshCheEnvironments().catch(() => undefined)
       return row
     },
     cleanup: async (args) => {

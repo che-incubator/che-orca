@@ -459,7 +459,7 @@ diff --git a/src/renderer/src/components/sidebar/worktree-list/listing/use-secti
 -        // Why: projects/workspaces are the primary sidebar object; host sections are only an explicit host-filter view.
 -        preferProjectGrouping: true
 +        // Managed agent runtimes get their own collapsible host sections.
-+        preferProjectGrouping: !orderedHostOptions.some((host) => host.source === 'ephemeral-vm')
++        preferProjectGrouping: !orderedHostOptions.some((host) => 'source' in host && host.source === 'ephemeral-vm')
        }),
      [
        args.visibleWorkspaceHostIds,
@@ -595,7 +595,7 @@ index 77a215d0..67f77d6d 100644
 +        creationId,
 +        `Agent environment unavailable: ${preparedTarget.error}\nCreating the workspace here instead.\n`
 +      )
-+      toast.info('Created the workspace here: an agent environment is not available.', {
++      toast.info('Creating the workspace here: an agent environment is not available.', {
 +        description: preparedTarget.error
 +      })
 +      useAppStore.getState().updatePendingWorktreeCreation(creationId, {

@@ -122,10 +122,13 @@ export function checkRepoUrl(repoUrl) {
   if (!/^(https:\/\/|ssh:\/\/|git@)/.test(repoUrl) || /[\r\n]/.test(repoUrl)) {
     throw new Error('The project needs an HTTPS or SSH Git origin accessible from the agent namespace.');
   }
+  const credentials = 'Use a namespace Git credential Secret instead of credentials in the Git URL.';
   if (repoUrl.startsWith('https://')) {
     const url = new URL(repoUrl);
-    if (url.username || url.password || url.search) throw new Error('Use a namespace Git credential Secret instead of credentials in the Git URL.');
+    if (url.username || url.password || url.search) throw new Error(credentials);
   }
+  // A user name is fine over SSH; a password would be stored in the DevWorkspace.
+  if (repoUrl.startsWith('ssh://') && new URL(repoUrl).password) throw new Error(credentials);
 }
 
 export function pairingFromReadiness(text, host) {

@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="${1:?Usage: tests/injector.sh EDITOR_IMAGE}"
 
 podman run -i --rm --tmpfs /orca:mode=0777 \
-  --volume "$REPO_ROOT/entrypoint-init-container.sh:/entrypoint-init-container.sh:ro" \
+  --volume "$REPO_ROOT/entrypoint-init-container.sh:/entrypoint-init-container.sh:ro,Z" \
   --entrypoint /bin/bash "$IMAGE" -s <<'SH'
 set -e
 /entrypoint-init-container.sh >/dev/null

@@ -114,8 +114,25 @@ export const CHE_WORKSPACE_METHODS = [
     branch: z.string().optional(), ref: z.string().optional()
   }), handler: async (args, { runtime, signal }) => {
     const repo = runtime.listRepos().find((entry) => entry.id === args.repoId)
-    const checked = await probe(repo)
-    if (!('repoUrl' in checked)) {
+    const id = randomUUID()
+    const key = args.provisionId ?? id
+    if (controllers.has(key)) throw new InvalidArgumentError('Provisioning is already running for this request.')
+    // Register first so cancelProvision also stops a create still waiting on the probe.
+    const controller = new AbortController()
+    controllers.set(key, controller)
+    const abort = () => controller.abort()
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+    let checked: Awaited<ReturnType<typeof probe>>
+    try {
+      checked = await probe(repo)
+    } catch (error) {
+      signal?.removeEventListener('abort', abort); controllers.delete(key)
+      throw error
+    }
+    if (controller.signal.aborted || 'reason' in checked) {
+      signal?.removeEventListener('abort', abort); controllers.delete(key)
+      if (!('reason' in checked)) return { ok: false as const, error: 'Provisioning was cancelled.', stdout: '', stderr: '' }
       // Recheck at create time: the composer's recipe list can be stale.
       const error = checked.reason ?? 'Agent workspaces are not configured on this Orca server.'
       logUnavailable(error)
@@ -123,11 +140,7 @@ export const CHE_WORKSPACE_METHODS = [
     }
     const { repoUrl } = checked
     const backend = provider()
-    const id = randomUUID()
     const allocation = backend.allocation(id)
-    const controller = new AbortController()
-    const key = args.provisionId ?? id
-    if (controllers.has(key)) throw new InvalidArgumentError('Provisioning is already running for this request.')
     const now = Date.now()
     upsertEphemeralVmRuntime(dataPath(), {
       id, recipeId: recipe.id, recipe, repoId: args.repoId, projectId: args.projectId,
@@ -135,11 +148,7 @@ export const CHE_WORKSPACE_METHODS = [
       status: 'provisioning', cleanupStatus: 'not_started', createdAt: now, updatedAt: now,
       recipeResult: { schemaVersion: 1, pairingCode: 'pending', projectRoot: '/projects/source', userData: allocation }
     })
-    controllers.set(key, controller)
     operations.add(id)
-    const abort = () => controller.abort()
-    signal?.addEventListener('abort', abort, { once: true })
-    if (signal?.aborted) abort()
     try {
       const recipeResult = await backend.create(allocation, repoUrl, controller.signal)
       const environment = addEnvironmentFromPairingCode(dataPath(), {

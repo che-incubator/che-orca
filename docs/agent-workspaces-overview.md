@@ -170,6 +170,12 @@ labels), the Role and binding, and the template. It never deletes the namespace.
 - **What it cannot do:** read Secrets, list DevWorkspaces, change RBAC, create
   namespaces, or touch other namespaces. This was checked on a cluster and returned
   403.
+- **The Role is bound to every ServiceAccount in the user namespace, on purpose.**
+  The DevWorkspace Operator gives each workspace its own ServiceAccount, and choosing
+  one per workspace needs a cluster-wide operator setting. So any workspace in the
+  user's own namespace, not only Orca, can use this Role. The namespace belongs to one
+  user, so this doesn't grant access across users. che-operator should bind a
+  dedicated ServiceAccount when it takes this over.
 - **Children have no RBAC in the agent namespace.** The DevWorkspace Operator still
   mounts a ServiceAccount token, because its `automountServiceAccountToken` override
   is ignored. That token only grants basic authenticated access.
