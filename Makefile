@@ -6,7 +6,6 @@ ORCA_CONFIGMAP ?= orca-editor-definition
 # The editor definition lives only in che-operator. Point this at a che-operator
 # checkout's editors-definitions/che-orca-next.yaml to test a change to it.
 CHE_OPERATOR_DEFINITION ?=
-CHE_OPERATOR_DEFINITION_URL := https://raw.githubusercontent.com/eclipse-che/che-operator/main/editors-definitions/che-orca-next.yaml
 
 .PHONY: check-namespace build push devfile register unregister deploy teardown
 
@@ -19,12 +18,10 @@ build:
 push:
 	podman push $(ORCA_IMAGE)
 
+# Written only after rendering succeeds.
 devfile:
-ifeq ($(CHE_OPERATOR_DEFINITION),)
-	curl -fsSL $(CHE_OPERATOR_DEFINITION_URL) | python3 shared/render-devfile.py /dev/stdin --output devfile-rendered.yaml
-else
-	python3 shared/render-devfile.py $(CHE_OPERATOR_DEFINITION) --output devfile-rendered.yaml
-endif
+	@bash -c 'REPO_ROOT="$$PWD"; source shared/deploy.sh && fetch_editor_definition && \
+	  out=$$(render_editor "$$EDITOR_DEFINITION") && printf "%s\n" "$$out" > devfile-rendered.yaml'
 
 register: check-namespace devfile
 	oc create configmap $(ORCA_CONFIGMAP) \

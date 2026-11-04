@@ -35,14 +35,36 @@ fetch_editor_definition() {
   curl -fsSL "$CHE_OPERATOR_DEFINITION_URL" -o "$EDITOR_DEFINITION"
 }
 
-render_devfile() (
-  export ORCA_IMAGE
-  python3 "$REPO_ROOT/shared/render-devfile.py" "$@"
-)
+# Prints the editor definition with ORCA_IMAGE in place of the published image, which
+# che-operator's release flow pins. With a name, wraps it in a DevWorkspaceTemplate.
+render_editor() {
+  local definition="$1" template="${2:-}" image="quay\.io/che-incubator/che-orca:[A-Za-z0-9._-]*"
+  [ -n "${ORCA_IMAGE:-}" ] || { echo "Set ORCA_IMAGE in config.env" >&2; return 1; }
+  if ! grep -q "$image" "$definition"; then
+    echo "$definition does not reference quay.io/che-incubator/che-orca." >&2
+    return 1
+  fi
+  if [ -n "$template" ]; then
+    sed "s|$image|$ORCA_IMAGE|g" "$definition" | awk -v name="$template" '
+      BEGIN {
+        print "apiVersion: workspace.devfile.io/v1alpha2"
+        print "kind: DevWorkspaceTemplate"
+        print "metadata:\n  name: " name "\nspec:"
+        keep = 1
+      }
+      # Everything except schemaVersion and metadata goes under spec.
+      /^[A-Za-z][A-Za-z0-9_-]*:/ { keep = $0 !~ /^(schemaVersion|metadata):/ }
+      keep { print (length($0) ? "  " $0 : "") }'
+  else
+    # The dashboard identifies editors by publisher/name/version; don't shadow che-operator's.
+    sed "s|$image|$ORCA_IMAGE|g" "$definition" |
+      awk '!done && /^    version: / { print "    version: dev"; done = 1; next } { print }'
+  fi
+}
 
 create_editor_template() {
   local definition="$1" editor="$2" manifest
-  manifest=$(render_devfile "$definition" --template "$editor") || return 1
+  manifest=$(render_editor "$definition" "$editor") || return 1
   echo "Creating editor template..."
   printf '%s\n' "$manifest" | oc apply -n "$NAMESPACE" -f -
 }

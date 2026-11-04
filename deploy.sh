@@ -10,7 +10,7 @@ load_config
 ORCA_IMAGE="${ORCA_IMAGE:?Set ORCA_IMAGE in config.env}"
 check_agent_environment
 fetch_editor_definition
-render_devfile "$EDITOR_DEFINITION" --check
+render_editor "$EDITOR_DEFINITION" >/dev/null
 
 echo "=== Deploying Orca to namespace: $NAMESPACE ==="
 

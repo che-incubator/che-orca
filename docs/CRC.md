@@ -20,7 +20,7 @@ Install:
 
 - [CRC / Red Hat OpenShift Local](https://crc.dev/docs/installing/) and download
   an OpenShift pull secret through the linked Red Hat download page.
-- [Podman](https://podman.io/docs/installation), Git, Bash, and Python 3.
+- [Podman](https://podman.io/docs/installation), Git, Bash, and `curl`.
 - [chectl](https://eclipse.dev/che/docs/stable/administration-guide/installing-the-chectl-management-tool/).
 - On macOS, Homebrew for the wildcard DNS setup below. `watch` is optional.
 

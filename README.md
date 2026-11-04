@@ -31,7 +31,7 @@ Keeping the runtime on a volume means your workspace keeps the full universal de
 
 - An OpenShift cluster with Eclipse Che installed.
 - Bash and `podman` on your machine. The deploy script uses Podman.
-- Python 3 and `curl` to render che-operator's editor definition.
+- `curl` to fetch che-operator's editor definition.
 - The `oc` CLI, logged in to the cluster.
 - Permission to create DevWorkspaces and DevWorkspaceTemplates in your Che user workspace namespace.
 - A registry you can push to and that workspace pods can pull from. A public image is convenient on shared clusters where you cannot configure pull credentials.
@@ -236,7 +236,7 @@ web-client.patch                upstream patch applied during the build
 agent-workspaces.patch          upstream patch that wires in the agent environment provider
 integration/                    new upstream source files: DevWorkspace provider and browser API
 tests/injector.sh               repeat-injection regression check against a built image
-shared/                         deploy helpers, editor definition renderer, runtime setup
+shared/                         deploy and editor definition helpers, runtime setup
 config.env.example              documented local configuration
 Makefile                        build, push, and admin registration targets
 ```
