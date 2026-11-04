@@ -4,14 +4,18 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=shared/deploy.sh
 source "$REPO_ROOT/shared/deploy.sh"
+# shellcheck source=shared/agent-workspaces.sh
+source "$REPO_ROOT/shared/agent-workspaces.sh"
 load_config
 ORCA_IMAGE="${ORCA_IMAGE:?Set ORCA_IMAGE in config.env}"
+check_agent_environment
 render_devfile "$REPO_ROOT/devfile.yaml" --check
 
 echo "=== Deploying Orca to namespace: $NAMESPACE ==="
 
 # Step 1: Build and push
 build_and_push_image "$ORCA_IMAGE" "$REPO_ROOT"
+apply_agent_environment
 
 # Step 2: DevWorkspaceTemplate
 create_editor_template "$REPO_ROOT/devfile.yaml" "orca-editor"

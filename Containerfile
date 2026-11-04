@@ -16,6 +16,10 @@ RUN curl -fsSL "https://github.com/stablyai/orca/archive/refs/tags/v${ORCA_VERSI
 # Wire in the web root and initialize the standalone terminal graph.
 COPY web-client.patch /tmp/web-client.patch
 RUN patch -p1 < /tmp/web-client.patch
+# Add the Che DevWorkspace provider for per-workspace agent environments.
+COPY integration/ ./
+COPY agent-workspaces.patch /tmp/agent-workspaces.patch
+RUN patch -p1 < /tmp/agent-workspaces.patch
 
 # Build the standalone runtime without downloading or rebuilding Electron.
 RUN NODE_ENV=development pnpm install --frozen-lockfile --ignore-scripts && \
@@ -50,6 +54,22 @@ RUN case "$TARGETARCH" in \
       runtime.prunePackagedRuntimeNodeModules("/opt/orca-cli", "linux", process.argv[1]); \
     ' "$ORCAD_ARCH"
 
+# Fetch the target's standalone OpenCode binary without executing target code.
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/nodejs-24 AS opencode
+USER 0
+ARG TARGETARCH
+ARG OPENCODE_VERSION=2.1.4
+RUN case "$TARGETARCH" in \
+      amd64) OPENCODE_ARCH=x64-baseline ;; \
+      arm64) OPENCODE_ARCH=arm64 ;; \
+      *) echo "Unsupported OpenCode architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac && \
+    mkdir -p /opt/opencode && \
+    npm pack --ignore-scripts --pack-destination /tmp "@opencode/cli-linux-${OPENCODE_ARCH}@${OPENCODE_VERSION}" && \
+    tar -xzf "/tmp/opencode-cli-linux-${OPENCODE_ARCH}-${OPENCODE_VERSION}.tgz" \
+      --strip-components=2 -C /opt/opencode package/bin/opencode && \
+    chmod 755 /opt/opencode/opencode
+
 FROM registry.access.redhat.com/ubi9/nodejs-22
 
 USER 0
@@ -64,6 +84,7 @@ COPY --from=builder /src/orca/LICENSE /opt/orca/LICENSE
 COPY --from=builder /opt/orca-cli /opt/orca/cli
 COPY --from=builder /src/orca/skills /opt/orca/skills
 COPY orca.sh /opt/orca/bin/orca
+COPY --from=opencode /opt/opencode/opencode /opt/orca/bin/opencode
 COPY shared/runtime.sh /usr/local/bin/shared-runtime.sh
 COPY shared/bashrc.sh /usr/local/bin/shared-bashrc.sh
 COPY entrypoint.sh /usr/local/bin/orca-entrypoint.sh

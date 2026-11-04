@@ -44,6 +44,7 @@ components:
   - name: orca-runtime
     container:
       image: ${ORCA_IMAGE}
+      mountSources: true
       volumeMounts:
         - name: orca
           path: /orca

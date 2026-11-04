@@ -9,6 +9,9 @@ setup_runtime /orca/bashrc.sh || exit 1
 export PATH="/orca/bin:/injected-tools/bin:${PATH}"
 export SHELL=/bin/bash
 
+# Verify the injected agent before advertising a usable Orca runtime.
+/orca/bin/opencode --version || exit 78
+
 PERSIST="${PROJECTS_ROOT:-/projects}/.che-orca"
 mkdir -p "$PERSIST/orca-home" || exit 1
 chmod 700 "$PERSIST" || exit 1
@@ -32,18 +35,21 @@ export ORCA_USER_DATA="$PERSIST/orca-home"
 export ORCA_USER_DATA_PATH="$ORCA_USER_DATA"
 export ORCA_VERSION=1.4.219
 
-# orcad listens on loopback, where only Che's gateway reaches it, after the Che login.
-# The web client is served from a copy whose page pairs with orcad on load. It lives in
-# /tmp because the page holds the pairing token. Until orcad is ready, the copy serves
-# the unmodified page.
-WEB_ROOT=/tmp/che-orca-web
-rm -rf "$WEB_ROOT" && mkdir "$WEB_ROOT" || exit 1
-ln -s /orca/web/* "$WEB_ROOT/" || exit 1
-export ORCA_WEB_ROOT="$WEB_ROOT"
+# The main editor uses Che's authenticated gateway and a private auto-pairing
+# page. Children explicitly advertise a direct Route and serve the plain client;
+# their pairing credentials are delivered through the controller.
+ARGS=(--port 6768 --json)
+if [ -n "${ORCA_PAIRING_ADDRESS:-}" ]; then
+  export ORCA_WEB_ROOT=/orca/web
+  ARGS+=(--bind 0.0.0.0 --pairing-address "$ORCA_PAIRING_ADDRESS")
+else
+  WEB_ROOT=/tmp/che-orca-web
+  rm -rf "$WEB_ROOT" && mkdir "$WEB_ROOT" || exit 1
+  ln -s /orca/web/* "$WEB_ROOT/" || exit 1
+  export ORCA_WEB_ROOT="$WEB_ROOT"
+fi
 
 cd "${PROJECTS_ROOT:-/projects}" || exit 1
-
-ARGS=(--port 6768 --json)
 
 write_pairing_page() {
   if printf '%s\n' "$1" | /orca/runtime/bun-runtime /orca/pairing-page.js \
@@ -102,7 +108,9 @@ register_when_ready() {
   while IFS= read -r line; do
     case "$line" in
       *'"type":"orca_server_ready"'*)
-        write_pairing_page "$line"
+        if [ -z "${ORCA_PAIRING_ADDRESS:-}" ]; then
+          write_pairing_page "$line"
+        fi
         setup_orca &
         break
         ;;

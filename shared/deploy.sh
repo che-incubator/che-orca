@@ -12,9 +12,9 @@ load_config() {
 }
 
 build_and_push_image() {
-  local image="$1" editor_dir="$2"
-  echo "Building image for linux/amd64..."
-  podman build --platform linux/amd64 -f "$editor_dir/Containerfile" -t "$image" "$REPO_ROOT"
+  local image="$1" editor_dir="$2" platform="${ORCA_PLATFORM:-linux/amd64}"
+  echo "Building image for $platform..."
+  podman build --platform "$platform" -f "$editor_dir/Containerfile" -t "$image" "$REPO_ROOT"
   echo "Pushing image..."
   podman push "$image"
 }
