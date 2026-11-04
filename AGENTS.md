@@ -4,7 +4,7 @@ Use `./deploy.sh` for the full build, image push, editor registration, and works
 
 Use `./teardown.sh` to remove the deployment.
 
-Edit `devfile.yaml` for editor components, commands, and events. Deployment and dashboard registration use the same renderer in `shared/render-devfile.py`. Keep startup logic in the image so the definition stays thin. che-operator ships a copy as `editors-definitions/che-orca-next.yaml`; after a `devfile.yaml` change merges, update it with `make editor-definition` and a che-operator pull request.
+The editor definition lives only in che-operator, as `editors-definitions/che-orca-next.yaml`. Change it there with a che-operator pull request, after testing it with `CHE_OPERATOR_DEFINITION=<path> ./deploy.sh`. Keep startup logic in the image so the definition stays thin.
 
 Run ShellCheck for script changes. Keep local configuration, pairing URLs, and logs out of commits.
 

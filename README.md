@@ -4,7 +4,7 @@
 
 Run [Orca](https://github.com/stablyai/orca) as an editor in an Eclipse Che workspace, together with the Orca CLI. Orca provides a browser environment for coding agents and parallel Git worktrees.
 
-This repository contains the container recipe, devfile, and scripts that build an image and create a workspace in your user namespace.
+This repository contains the container recipe and the scripts that build an image and create a workspace in your user namespace. The editor definition lives in che-operator as [`editors-definitions/che-orca-next.yaml`](https://github.com/eclipse-che/che-operator/blob/main/editors-definitions/che-orca-next.yaml); the scripts deploy it with your image.
 
 For a fresh local cluster, follow the [CRC setup and end-to-end test walkthrough](docs/CRC.md).
 
@@ -20,7 +20,7 @@ This is an experiment, and upstream Orca changes can break the integration. It i
 
 ## How it works
 
-The devfile adds two components to the workspace:
+The editor definition adds two components to the workspace:
 
 - **`orca-injector`** runs as a `preStart` init container. It copies the Orca standalone runtime, prebuilt web client, and Orca CLI out of the image and onto the shared `orca` volume mounted at `/orca`.
 - **`orca-runtime`** is a container contribution. Che merges it into the workspace's tool container, or runs it in the Orca image when the workspace has none. A `postStart` command launches `/orca/entrypoint.sh`, which starts `orcad` on port 6768 and serves the web client from `/orca/web`. The workspace URL opens the web client like any other Che editor.
@@ -31,7 +31,7 @@ Keeping the runtime on a volume means your workspace keeps the full universal de
 
 - An OpenShift cluster with Eclipse Che installed.
 - Bash and `podman` on your machine. The deploy script uses Podman.
-- Python 3 for devfile rendering.
+- Python 3 and `curl` to render che-operator's editor definition.
 - The `oc` CLI, logged in to the cluster.
 - Permission to create DevWorkspaces and DevWorkspaceTemplates in your Che user workspace namespace.
 - A registry you can push to and that workspace pods can pull from. A public image is convenient on shared clusters where you cannot configure pull credentials.
@@ -70,7 +70,7 @@ Run `oc project -q` to check your current namespace. The scripts require an expl
 ./deploy.sh
 ```
 
-The script builds and pushes an image (`linux/amd64` unless `ORCA_PLATFORM` is set), renders the devfile into a `DevWorkspaceTemplate`, creates the `orca-workspace` DevWorkspace, waits for Orca to start, and then prints the workspace URL:
+The script builds and pushes an image (`linux/amd64` unless `ORCA_PLATFORM` is set), fetches che-operator's editor definition, renders it into a `DevWorkspaceTemplate` with your image, creates the `orca-workspace` DevWorkspace, waits for Orca to start, and then prints the workspace URL:
 
 ```
 === Orca is ready ===
@@ -104,7 +104,7 @@ ORCA_AGENT_NAMESPACE_TEMPLATE='<username>-agent-devspaces'
 These settings mirror a proposed `devAgentEnvironments` section in the CheCluster, and `deploy.sh` does what che-operator would do with it:
 
 - Resolves `<username>` with `oc whoami` and checks that the agent namespace exists. Creating it on first use needs the operator; until then, create it with `oc new-project` or ask an administrator.
-- Applies `orca-agent-editor` to the agent namespace, rendered from the same `devfile.yaml`.
+- Applies `orca-agent-editor` to the agent namespace, rendered from the same editor definition.
 - Binds the `orca-workspace-provisioner` Role in the agent namespace to the ServiceAccounts of your user namespace. It allows managing DevWorkspaces, Services, and Routes, reading the editor template and pods, and pod exec for Orca's private readiness file. It does not allow reading Secrets, changing RBAC, or creating namespaces.
 - Creates the `orca-agent-environment` ConfigMap in your user namespace. The DevWorkspace Operator mounts it as environment variables into your workspaces, so the editor template carries no per-user settings and also works when registered on the dashboard.
 
@@ -196,7 +196,7 @@ Teardown removes the workspace and editor template in `NAMESPACE`. Storage reten
 
 ## Cluster-wide registration
 
-`deploy.sh` creates a template in your own namespace. To add Orca to the dashboard editor picker for everyone, set `NAMESPACE` to the Che installation namespace and run:
+Che already lists Orca on the dashboard as `che-incubator/che-orca/next`. `deploy.sh` creates a template in your own namespace. To add your image to the dashboard editor picker for everyone, as `che-incubator/che-orca/dev`, set `NAMESPACE` to the Che installation namespace and run:
 
 ```bash
 make register
@@ -205,7 +205,7 @@ make register
 Users can then pick Orca on the dashboard's Create Workspace page and enter a repository under Import from Git. Che clones the repository into `/projects` and Orca registers it on start. The same choice works as a link:
 
 ```text
-https://<che-host>/#https://github.com/my-org/my-repo?che-editor=stablyai/orca-editor/latest
+https://<che-host>/#https://github.com/my-org/my-repo?che-editor=che-incubator/che-orca/dev
 ```
 
 Remove it with `make unregister`. Restore your user namespace in `config.env` before deploying or tearing down a workspace.
@@ -226,7 +226,6 @@ The entrypoint restarts the server after two seconds if it exits. Exit code 78 i
 
 ```
 Containerfile                   multi-stage build: Orca runtime, web client, CLI
-devfile.yaml                    injector and runtime components, preStart/postStart events
 deploy.sh                       build, push, template, workspace, workspace URL
 teardown.sh                     remove workspace and template
 entrypoint-init-container.sh    copies the runtime and CLI onto the /orca volume
@@ -237,29 +236,24 @@ web-client.patch                upstream patch applied during the build
 agent-workspaces.patch          upstream patch that wires in the agent environment provider
 integration/                    new upstream source files: DevWorkspace provider and browser API
 tests/injector.sh               repeat-injection regression check against a built image
-shared/                         deploy helpers, devfile renderer, runtime setup
+shared/                         deploy helpers, editor definition renderer, runtime setup
 config.env.example              documented local configuration
 Makefile                        build, push, and admin registration targets
 ```
 
-Changes to the editor components, commands, and events belong in `devfile.yaml`. Deployment and admin registration use the same renderer, which substitutes configuration values and preserves runtime variables such as `$PATH`.
+### Editor definition
 
-### Dashboard editor definition
+The editor definition lives only in che-operator, as [`editors-definitions/che-orca-next.yaml`](https://github.com/eclipse-che/che-operator/blob/main/editors-definitions/che-orca-next.yaml). The Che dashboard, `deploy.sh`, agent workspaces, and `make register` all use it; the scripts replace its `quay.io/che-incubator/che-orca` image with `ORCA_IMAGE`. At each Che release, che-operator pins the image to the release version.
 
-The Che dashboard's built-in Orca entry comes from che-operator's [`editors-definitions/che-orca-next.yaml`](https://github.com/eclipse-che/che-operator/blob/main/editors-definitions/che-orca-next.yaml), not from this repository. Like the other Che editors, it stays thin: an injector copies the runtime from the image, and one `postStart` command runs `/orca/entrypoint.sh`. Keep startup logic in the image, not in the definition.
+Like the other Che editors, the definition stays thin: an injector copies the runtime from the image, and one `postStart` command runs `/orca/entrypoint.sh`. Keep startup logic in the image. An image change must keep working with the definition che-operator already ships.
 
-che-operator keeps its own header and metadata; everything else must match `devfile.yaml` with the image set to `quay.io/che-incubator/che-orca:next`. At each Che release, che-operator pins that image to the release version and freezes the definition with it.
-
-After a change to `devfile.yaml` merges and `che-orca:next` is published, update che-operator:
+To change the definition, edit a che-operator checkout and test it before opening a pull request against `eclipse-che/che-operator`:
 
 ```bash
-make check-editor-definition                 # show the difference
-make editor-definition CHE_OPERATOR_DEFINITION=../che-operator/editors-definitions/che-orca-next.yaml
+CHE_OPERATOR_DEFINITION=../che-operator/editors-definitions/che-orca-next.yaml ./deploy.sh
 ```
 
-Then open a pull request against `eclipse-che/che-operator`. The `Editor definition` workflow warns on pull requests here and fails on `main` and weekly while the two differ.
-
-For local changes, check Bash syntax and run ShellCheck before testing a deployment. Keep credentials and rendered devfiles out of commits.
+For local changes, check Bash syntax and run ShellCheck before testing a deployment. Keep credentials and rendered definitions out of commits.
 
 ## License
 

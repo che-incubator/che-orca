@@ -284,7 +284,7 @@ oc get configmap orca-agent-environment -n developer-devspaces
 The main workspace should reach `Running`. The agent namespace has no child pods
 until you create a workspace in Orca.
 
-The templates come from this repository's `devfile.yaml`: an injector supplying Orca and OpenCode and a runtime contribution. The main
+The templates come from che-operator's editor definition: an injector supplying Orca and OpenCode and a runtime contribution. The main
 workspace opens through Che login; children use UDI containers and direct Routes. The provisioner currently
 **does not use the cloned project's own devfile**.
 
@@ -474,11 +474,11 @@ oc rollout status daemonset/multus -n openshift-multus --timeout=120s
 
 Switch back to `developer` and retry. Do not reset networking for unrelated errors.
 
-### New devfile/image changes do not appear in existing workspaces
+### Editor definition or image changes do not appear in existing workspaces
 
 `./deploy.sh` updates the templates and published image. Existing child
 DevWorkspaces retain their copied definitions. Recreate disposable test children
-to pick up changed devfile settings. Restart the main workspace to rerun its
+to pick up a changed editor definition. Restart the main workspace to rerun its
 injector after an image update. A browser refresh alone only reloads the client.
 
 ### Permission denied when creating an agent workspace

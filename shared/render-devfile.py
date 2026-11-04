@@ -1,7 +1,6 @@
-"""Render an editor devfile, wrap its spec in a DevWorkspaceTemplate, or sync che-operator's copy."""
+"""Render che-operator's Orca editor definition with a test image, optionally as a DevWorkspaceTemplate."""
 
 import argparse
-import difflib
 import os
 from pathlib import Path
 import re
@@ -9,24 +8,12 @@ import sys
 import tempfile
 
 
-IMAGE_VARIABLES = {"ORCA_IMAGE"}
-PLACEHOLDER = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
+# che-operator's definition pulls the published image; its release flow pins the tag.
+PUBLISHED_IMAGE = re.compile(r"quay\.io/che-incubator/che-orca:[\w.-]+")
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z][\w-]*):")
 # Devfile keys that are not part of a DevWorkspaceTemplate spec.
 NON_SPEC_KEYS = {"schemaVersion", "metadata"}
-# The image che-operator's editor definition pulls; its release flow pins this tag.
-PUBLISHED_IMAGE = "quay.io/che-incubator/che-orca:next"
-
-
-def substitute(text, environment):
-    def replace(match):
-        name = match[1]
-        if name in IMAGE_VARIABLES:
-            if not environment.get(name):
-                raise ValueError(f"Set {name} in config.env")
-            return environment[name]
-        return match[0]
-    return PLACEHOLDER.sub(replace, text)
+METADATA_VERSION = re.compile(r"^(    version: ).*$", re.MULTILINE)
 
 
 def wrap_template(text, template_name):
@@ -49,31 +36,19 @@ def wrap_template(text, template_name):
     return "\n".join(header + spec).rstrip() + "\n"
 
 
-def split_spec(text):
-    # Returns the header (comments, schemaVersion, metadata) and the spec blocks after it.
-    lines = text.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        key = TOP_LEVEL_KEY.match(line)
-        if key and key[1] not in NON_SPEC_KEYS:
-            return "".join(lines[:index]), "".join(lines[index:])
-    raise ValueError("The devfile has no commands, events, or components")
-
-
-def che_operator_definition(path, current):
-    # che-operator owns the dashboard metadata; this repository owns how the editor runs.
-    header, _ = split_spec(current)
-    _, spec = split_spec(render(path, {"ORCA_IMAGE": PUBLISHED_IMAGE}))
-    return header + spec
-
-
-def render(path, environment, template_name=None):
+def render(path, image, template_name=None):
     text = Path(path).read_text()
     if not re.search(r"^components:\s*\n\s+- ", text, re.MULTILINE):
-        raise ValueError("The devfile must contain a nonempty components list")
-    text = substitute(text, environment)
+        raise ValueError(f"{path} must contain a nonempty components list")
+    if not PUBLISHED_IMAGE.search(text):
+        raise ValueError(f"{path} does not reference quay.io/che-incubator/che-orca")
+    if not image:
+        raise ValueError("Set ORCA_IMAGE in config.env")
+    text = PUBLISHED_IMAGE.sub(lambda _: image, text)
     if template_name:
-        text = wrap_template(text, template_name)
-    return text
+        return wrap_template(text, template_name)
+    # The dashboard identifies editors by publisher/name/version; don't shadow che-operator's.
+    return METADATA_VERSION.sub(r"\g<1>dev", text, count=1)
 
 
 def write_output(path, text):
@@ -92,30 +67,13 @@ def write_output(path, text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("devfile", type=Path)
+    parser.add_argument("definition", type=Path, help="che-operator's editors-definitions/che-orca-next.yaml")
     parser.add_argument("--template", help="DevWorkspaceTemplate resource name")
     parser.add_argument("--output", type=Path, help="Write a private rendered file instead of stdout")
-    parser.add_argument("--che-operator", type=Path, metavar="DEFINITION",
-                        help="Render che-operator's editors-definitions/che-orca-next.yaml from this devfile, "
-                             "keeping the header and metadata of the given copy")
-    parser.add_argument("--check", action="store_true", help="Validate the devfile and variables without writing output; "
-                        "with --che-operator, fail when the given copy differs")
+    parser.add_argument("--check", action="store_true", help="Validate the definition and variables without writing output")
     args = parser.parse_args()
     try:
-        if args.che_operator:
-            # Read once, so the copy can come from a pipe (/dev/stdin).
-            current = args.che_operator.read_text()
-            text = che_operator_definition(args.devfile, current)
-            if args.check:
-                if current != text:
-                    sys.stderr.writelines(difflib.unified_diff(
-                        current.splitlines(keepends=True), text.splitlines(keepends=True),
-                        "che-operator/editors-definitions/che-orca-next.yaml", "devfile.yaml rendered for che-operator"))
-                    sys.exit("render-devfile: che-operator's editor definition differs from devfile.yaml. "
-                             "Run `make editor-definition` and open a che-operator pull request with the result.")
-                return
-        else:
-            text = render(args.devfile, os.environ, args.template)
+        text = render(args.definition, os.environ.get("ORCA_IMAGE"), args.template)
         if args.check:
             return
         if args.output:

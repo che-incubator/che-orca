@@ -45,7 +45,7 @@ apply_agent_environment() {
   agent_environments_enabled || return 0
   echo "Configuring agent environments in namespace: $ORCA_AGENT_NAMESPACE"
   # Child workspaces use the same editor; the controller sets their pairing address.
-  render_devfile "$REPO_ROOT/devfile.yaml" --template "$AGENT_EDITOR" |
+  render_devfile "$EDITOR_DEFINITION" --template "$AGENT_EDITOR" |
     oc apply -n "$ORCA_AGENT_NAMESPACE" -f - || return 1
   # Every workspace in the user namespace may provision agents; none of them may read
   # Secrets, change RBAC, or create namespaces through this Role.

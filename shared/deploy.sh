@@ -19,14 +19,30 @@ build_and_push_image() {
   podman push "$image"
 }
 
+CHE_OPERATOR_DEFINITION_URL=https://raw.githubusercontent.com/eclipse-che/che-operator/main/editors-definitions/che-orca-next.yaml
+
+# Sets EDITOR_DEFINITION to che-operator's Orca editor definition, the only copy. Set
+# CHE_OPERATOR_DEFINITION to a che-operator checkout's file to test a change to it.
+fetch_editor_definition() {
+  if [ -n "${CHE_OPERATOR_DEFINITION:-}" ]; then
+    EDITOR_DEFINITION="$CHE_OPERATOR_DEFINITION"
+    return 0
+  fi
+  EDITOR_DEFINITION=$(mktemp "${TMPDIR:-/tmp}/che-orca-next.XXXXXX") || return 1
+  # shellcheck disable=SC2064 # Expand the path now; the variable can change later.
+  trap "rm -f '$EDITOR_DEFINITION'" EXIT
+  echo "Fetching che-operator's editor definition..."
+  curl -fsSL "$CHE_OPERATOR_DEFINITION_URL" -o "$EDITOR_DEFINITION"
+}
+
 render_devfile() (
   export ORCA_IMAGE
   python3 "$REPO_ROOT/shared/render-devfile.py" "$@"
 )
 
 create_editor_template() {
-  local devfile="$1" editor="$2" manifest
-  manifest=$(render_devfile "$devfile" --template "$editor") || return 1
+  local definition="$1" editor="$2" manifest
+  manifest=$(render_devfile "$definition" --template "$editor") || return 1
   echo "Creating editor template..."
   printf '%s\n' "$manifest" | oc apply -n "$NAMESPACE" -f -
 }
