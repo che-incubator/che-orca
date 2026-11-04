@@ -244,6 +244,21 @@ Makefile                        build, push, and admin registration targets
 
 Changes to the editor components, commands, and events belong in `devfile.yaml`. Deployment and admin registration use the same renderer, which substitutes configuration values and preserves runtime variables such as `$PATH`.
 
+### Dashboard editor definition
+
+The Che dashboard's built-in Orca entry comes from che-operator's [`editors-definitions/che-orca-next.yaml`](https://github.com/eclipse-che/che-operator/blob/main/editors-definitions/che-orca-next.yaml), not from this repository. Like the other Che editors, it stays thin: an injector copies the runtime from the image, and one `postStart` command runs `/orca/entrypoint.sh`. Keep startup logic in the image, not in the definition.
+
+che-operator keeps its own header and metadata; everything else must match `devfile.yaml` with the image set to `quay.io/che-incubator/che-orca:next`. At each Che release, che-operator pins that image to the release version and freezes the definition with it.
+
+After a change to `devfile.yaml` merges and `che-orca:next` is published, update che-operator:
+
+```bash
+make check-editor-definition                 # show the difference
+make editor-definition CHE_OPERATOR_DEFINITION=../che-operator/editors-definitions/che-orca-next.yaml
+```
+
+Then open a pull request against `eclipse-che/che-operator`. The `Editor definition` workflow warns on pull requests here and fails on `main` and weekly while the two differ.
+
 For local changes, check Bash syntax and run ShellCheck before testing a deployment. Keep credentials and rendered devfiles out of commits.
 
 ## License
