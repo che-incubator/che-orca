@@ -1,4 +1,5 @@
-include config.env
+# Optional, so `make devfile` works with ORCA_IMAGE and CHE_OPERATOR_DEFINITION alone.
+-include config.env
 export
 .DEFAULT_GOAL := build
 

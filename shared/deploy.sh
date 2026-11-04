@@ -38,14 +38,17 @@ fetch_editor_definition() {
 # Prints the editor definition with ORCA_IMAGE in place of the published image, which
 # che-operator's release flow pins. With a name, wraps it in a DevWorkspaceTemplate.
 render_editor() {
-  local definition="$1" template="${2:-}" image="quay\.io/che-incubator/che-orca:[A-Za-z0-9._-]*"
+  local definition="$1" template="${2:-}" swap
+  # Only component image fields, with an optional tag and digest; the digest would win.
+  local image='^([[:space:]]*image:[[:space:]]*)quay\.io/che-incubator/che-orca(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?[[:space:]]*$'
   [ -n "${ORCA_IMAGE:-}" ] || { echo "Set ORCA_IMAGE in config.env" >&2; return 1; }
-  if ! grep -q "$image" "$definition"; then
-    echo "$definition does not reference quay.io/che-incubator/che-orca." >&2
+  if ! grep -Eq "$image" "$definition"; then
+    echo "No component in $definition uses the quay.io/che-incubator/che-orca image." >&2
     return 1
   fi
+  swap="s|$image|\\1$ORCA_IMAGE|"
   if [ -n "$template" ]; then
-    sed "s|$image|$ORCA_IMAGE|g" "$definition" | awk -v name="$template" '
+    sed -E "$swap" "$definition" | awk -v name="$template" '
       BEGIN {
         print "apiVersion: workspace.devfile.io/v1alpha2"
         print "kind: DevWorkspaceTemplate"
@@ -57,7 +60,7 @@ render_editor() {
       keep { print (length($0) ? "  " $0 : "") }'
   else
     # The dashboard identifies editors by publisher/name/version; don't shadow che-operator's.
-    sed "s|$image|$ORCA_IMAGE|g" "$definition" |
+    sed -E "$swap" "$definition" |
       awk '!done && /^    version: / { print "    version: dev"; done = 1; next } { print }'
   fi
 }
