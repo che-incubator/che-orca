@@ -117,6 +117,17 @@ export class KubernetesClient {
   }
 }
 
+// Throws when an agent workspace could not clone this origin.
+export function checkRepoUrl(repoUrl) {
+  if (!/^(https:\/\/|ssh:\/\/|git@)/.test(repoUrl) || /[\r\n]/.test(repoUrl)) {
+    throw new Error('The project needs an HTTPS or SSH Git origin accessible from the agent namespace.');
+  }
+  if (repoUrl.startsWith('https://')) {
+    const url = new URL(repoUrl);
+    if (url.username || url.password || url.search) throw new Error('Use a namespace Git credential Secret instead of credentials in the Git URL.');
+  }
+}
+
 export function pairingFromReadiness(text, host) {
   for (const line of text.split('\n')) {
     let record;
@@ -174,13 +185,22 @@ export class DevWorkspaceProvider {
   // The caller removes partially created resources with destroy() if this fails.
   async create(resource, repoUrl, signal) {
     const paths = this.paths(resource);
-    if (!/^(https:\/\/|ssh:\/\/|git@)/.test(repoUrl) || /[\r\n]/.test(repoUrl)) {
-      throw new Error('The project needs an HTTPS or SSH Git origin accessible from the agent namespace.');
+    let started = false;
+    try {
+      checkRepoUrl(repoUrl);
+      const host = await this.prepare(resource, repoUrl, paths, signal);
+      started = true;
+      return await this.ready(resource, host, signal);
+    } catch (error) {
+      // Nothing runs in the agent namespace yet, so the caller can create the workspace
+      // on its own host instead. A cancelled request never falls back.
+      if (!started && !signal?.aborted && error instanceof Error) error.fallback = true;
+      throw error;
     }
-    if (repoUrl.startsWith('https://')) {
-      const url = new URL(repoUrl);
-      if (url.username || url.password || url.search) throw new Error('Use a namespace Git credential Secret instead of credentials in the Git URL.');
-    }
+  }
+
+  // Creates the Service, Route, and DevWorkspace, and returns the Route host.
+  async prepare(resource, repoUrl, paths, signal) {
     const metadata = { name: resource.name, labels: this.config.labels };
     await this.client.request('POST', paths.service, { apiVersion: 'v1', kind: 'Service', metadata,
       spec: { selector: { 'controller.devfile.io/devworkspace_name': resource.name }, ports: [{ port: 6768, targetPort: 6768 }] } }, signal);
@@ -217,7 +237,33 @@ export class DevWorkspaceProvider {
       apiVersion: 'workspace.devfile.io/v1alpha2', kind: 'DevWorkspace',
       metadata, spec: { started: true, routingClass: 'basic', template }
     }, signal);
-    return this.ready(resource, host, signal);
+    return host;
+  }
+
+  // Returns why this server cannot provision agent workspaces, or null when it can.
+  // Reading the editor template proves the namespace, RBAC, and template all exist.
+  async unavailable(signal) {
+    const namespace = this.config.namespace;
+    try {
+      await this.client.request('GET', `${DW}/namespaces/${namespace}/devworkspacetemplates/${this.config.template}`, undefined, signal);
+    } catch (error) {
+      if (error.statusCode === 404) return `The ${this.config.template} template is missing from ${namespace}.`;
+      if (error.statusCode === 403) return `This workspace has no access to ${namespace}.`;
+      return `Cannot reach ${namespace}: ${error.message}`;
+    }
+    for (const [group, resource] of [['workspace.devfile.io', 'devworkspaces'], ['', 'services'], ['route.openshift.io', 'routes']]) {
+      let review;
+      try {
+        review = await this.client.request('POST', '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews', {
+          apiVersion: 'authorization.k8s.io/v1', kind: 'SelfSubjectAccessReview',
+          spec: { resourceAttributes: { namespace, verb: 'create', group, resource } }
+        }, signal);
+      } catch (error) {
+        return `Cannot check permissions in ${namespace}: ${error.message}`;
+      }
+      if (review.status?.allowed !== true) return `This workspace cannot create ${resource} in ${namespace}.`;
+    }
+    return null;
   }
 
   async routeHost(resource, signal) {

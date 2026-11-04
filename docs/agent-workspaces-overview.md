@@ -79,6 +79,14 @@ suspend, and cleanup. Upstream Orca's remote-environment recipes only run in its
 Electron main process, so the browser build cannot use them. These methods expose
 the same behaviour over `orcad`'s RPC.
 
+- The Che DevWorkspace target is offered only when this workspace can use it: valid
+  configuration, an HTTPS or SSH origin, a readable agent editor template, and
+  permission to create DevWorkspaces, Services, and Routes in the agent namespace.
+  The cluster check is cached for 30 seconds; the reason for hiding the target is
+  logged once.
+- If provisioning fails before the DevWorkspace exists, the result carries
+  `fallback: true` and the composer creates the worktree in this workspace instead,
+  with an info toast. Later failures and cancellations still show an error.
 - Provisioning can be cancelled. Cancelling, or failing, rolls back whatever was created.
 - One lifecycle operation per environment runs at a time.
 - Each environment is recorded in Orca's existing ephemeral runtime store, so Orca
@@ -192,10 +200,15 @@ labels), the Role and binding, and the template. It never deletes the namespace.
   - Forced cleanup failure with retry, and cancel with full rollback.
   - Scoped RBAC, with 403 for forbidden calls.
   - Che login to the main workspace and the agent groups in the UI.
+  - Fallback through the controller RPC: the target is hidden for a project
+    without an origin and when the RoleBinding is removed, and provisioning
+    returns `fallback: true` with full rollback when the editor template
+    disappears mid-create.
 
 ## Not tested
 
 - `amd64` execution.
+- The fallback toast and local worktree creation in a browser; covered by unit tests only.
 - Kata, or any non-default runtime class.
 - A fresh-cluster run of the whole CRC walkthrough.
 - Full compatibility with OpenCode 2 and Orca's APIs.

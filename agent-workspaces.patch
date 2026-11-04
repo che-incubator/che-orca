@@ -463,3 +463,147 @@ diff --git a/src/renderer/src/components/sidebar/worktree-list/listing/use-secti
        }),
      [
        args.visibleWorkspaceHostIds,
+diff --git a/src/preload/api/ephemeral-vm-api.ts b/src/preload/api/ephemeral-vm-api.ts
+index 5b2bfe3b..e90ffb22 100644
+--- a/src/preload/api/ephemeral-vm-api.ts
++++ b/src/preload/api/ephemeral-vm-api.ts
+@@ -49,7 +49,8 @@ export type EphemeralVmApi = {
+         stderr: string
+         warnings: EphemeralVmRecipeResultWarning[]
+       }
+-    | { ok: false; error: string; stderr: string; stdout: string }
++    // fallback: nothing was created, so the workspace can be created on the source host.
++    | { ok: false; error: string; stderr: string; stdout: string; fallback?: boolean }
+   >
+   cancelProvision: (args: { provisionId: string }) => Promise<{ cancelled: boolean }>
+   onProvisionEvent: (
+diff --git a/src/renderer/src/lib/ephemeral-vm-workspace-target.ts b/src/renderer/src/lib/ephemeral-vm-workspace-target.ts
+index 67bd053a..3635c82a 100644
+--- a/src/renderer/src/lib/ephemeral-vm-workspace-target.ts
++++ b/src/renderer/src/lib/ephemeral-vm-workspace-target.ts
+@@ -40,6 +40,7 @@ export type PrepareEphemeralVmWorkspaceTargetResult =
+       ok: false
+       error: string
+       stderr: string
++      fallback?: boolean
+     }
+ 
+ export async function prepareEphemeralVmWorkspaceTarget(
+@@ -55,7 +56,12 @@ export async function prepareEphemeralVmWorkspaceTarget(
+     ...(args.provisionId ? { provisionId: args.provisionId } : {})
+   })
+   if (!provisioned.ok) {
+-    return { ok: false, error: provisioned.error, stderr: provisioned.stderr }
++    return {
++      ok: false,
++      error: provisioned.error,
++      stderr: provisioned.stderr,
++      ...(provisioned.fallback ? { fallback: true } : {})
++    }
+   }
+ 
+   const checkoutMode = getEphemeralVmRecipeResultCheckoutMode(provisioned.runtime.recipeResult)
+diff --git a/src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts b/src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts
+index 30061d81..71d8ff24 100644
+--- a/src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts
++++ b/src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts
+@@ -15,7 +15,7 @@ vi.mock('@/store', () => ({ useAppStore: { getState: () => store } }))
+ vi.mock('@/lib/ephemeral-vm-workspace-target', () => ({
+   prepareEphemeralVmWorkspaceTarget: prepareTargetMock
+ }))
+-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
++vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }))
+ 
+ import { prepareRequestForCreate } from './ephemeral-vm-worktree-creation'
+ 
+@@ -85,3 +85,63 @@ it('carries the captured provisioned-root ref identity into adoption', async ()
+     ephemeralVmExpectedRefHead: 'abc123'
+   })
+ })
++
++it('creates the workspace on the source host when no environment could be created', async () => {
++  prepareTargetMock.mockResolvedValue({
++    ok: false,
++    fallback: true,
++    error: 'This workspace cannot create devworkspaces.',
++    stderr: ''
++  })
++
++  const prepared = await prepareRequestForCreate('creation-1', {
++    repoId: 'repo-1',
++    name: 'feature',
++    setupDecision: 'inherit',
++    agent: null,
++    pendingFirstAgentMessageRename: false,
++    note: '',
++    startupPlan: null,
++    quickPrompt: '',
++    quickTelemetry: null,
++    ephemeralVmRecipe: {
++      sourceRepoId: 'repo-1',
++      recipeId: 'che-devworkspace',
++      projectId: 'github:example/repo'
++    }
++  })
++
++  expect(prepared).toMatchObject({ repoId: 'repo-1', name: 'feature' })
++  expect(prepared?.ephemeralVmRecipe).toBeUndefined()
++  expect(store.updatePendingWorktreeCreation).not.toHaveBeenCalledWith(
++    'creation-1',
++    expect.objectContaining({ status: 'error' })
++  )
++})
++
++it('keeps the error when the environment failed after it started', async () => {
++  prepareTargetMock.mockResolvedValue({ ok: false, error: 'Timed out.', stderr: '' })
++
++  const prepared = await prepareRequestForCreate('creation-1', {
++    repoId: 'repo-1',
++    name: 'feature',
++    setupDecision: 'inherit',
++    agent: null,
++    pendingFirstAgentMessageRename: false,
++    note: '',
++    startupPlan: null,
++    quickPrompt: '',
++    quickTelemetry: null,
++    ephemeralVmRecipe: {
++      sourceRepoId: 'repo-1',
++      recipeId: 'che-devworkspace',
++      projectId: 'github:example/repo'
++    }
++  })
++
++  expect(prepared).toBeNull()
++  expect(store.updatePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
++    status: 'error',
++    error: 'Timed out.'
++  })
++})
+diff --git a/src/renderer/src/lib/ephemeral-vm-worktree-creation.ts b/src/renderer/src/lib/ephemeral-vm-worktree-creation.ts
+index 77a215d0..67f77d6d 100644
+--- a/src/renderer/src/lib/ephemeral-vm-worktree-creation.ts
++++ b/src/renderer/src/lib/ephemeral-vm-worktree-creation.ts
+@@ -61,6 +61,22 @@ export async function prepareRequestForCreate(
+     if (!useAppStore.getState().pendingWorktreeCreations[creationId]) {
+       return null
+     }
++    if (preparedTarget.fallback) {
++      // Why: no environment was created, so the source host can still own the workspace.
++      const localRequest: WorktreeCreationRequest = { ...request, ephemeralVmRecipe: undefined }
++      appendProvisioningLog(
++        creationId,
++        `Agent environment unavailable: ${preparedTarget.error}\nCreating the workspace here instead.\n`
++      )
++      toast.info('Created the workspace here: an agent environment is not available.', {
++        description: preparedTarget.error
++      })
++      useAppStore.getState().updatePendingWorktreeCreation(creationId, {
++        phase: 'fetching',
++        request: localRequest
++      })
++      return localRequest
++    }
+     useAppStore.getState().updatePendingWorktreeCreation(creationId, {
+       status: 'error',
+       error: preparedTarget.error

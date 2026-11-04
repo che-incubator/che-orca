@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { z } from 'zod'
 import { getAppEnvironment } from '../../shared/app-environment'
 import { listEphemeralVmRuntimes, upsertEphemeralVmRuntime, updateEphemeralVmRuntimeStatus } from '../../shared/ephemeral-vm-runtime-store'
 import { addEnvironmentFromPairingCode, listEnvironments, removeEnvironment, updateEnvironmentFromPairingCode } from '../../shared/runtime-environment-store'
 import { redactRuntimeEnvironment } from '../../shared/runtime-environments'
 import { defineMethod, InvalidArgumentError } from '../runtime/rpc/core'
-import { configuration, DevWorkspaceProvider, type Resource } from './devworkspace-provider.mjs'
+import { checkRepoUrl, configuration, DevWorkspaceProvider, type Resource } from './devworkspace-provider.mjs'
 import type { EphemeralVmRuntimeRecord } from '../../shared/ephemeral-vm-runtimes'
 
 const recipe = { id: 'che-devworkspace', name: 'Che DevWorkspace', create: 'che:managed',
@@ -20,6 +21,47 @@ const provider = () => {
   if (!config) throw new InvalidArgumentError('DevWorkspace provisioning is not configured on this Orca server.')
   return new DevWorkspaceProvider(config)
 }
+
+// Agent workspaces are an upgrade, not a requirement: when this server cannot create
+// one, the composer offers only its normal targets and workspaces stay on this host.
+type Probe = { repoUrl: string } | { reason: string | null }
+type Repo = { path: string; kind?: string }
+const run = promisify(execFile)
+const CLUSTER_CHECK_MS = 30_000
+let clusterCheck: { at: number; reason: Promise<string | null> } | null = null
+let loggedReason: string | null = null
+
+function clusterUnavailable(backend: DevWorkspaceProvider): Promise<string | null> {
+  if (!clusterCheck || Date.now() - clusterCheck.at > CLUSTER_CHECK_MS) {
+    const reason = backend.unavailable(AbortSignal.timeout(10_000)).catch((error) => String(error))
+    clusterCheck = { at: Date.now(), reason }
+  }
+  return clusterCheck.reason
+}
+
+// A null reason means the feature is not configured, which needs no explanation.
+async function probe(repo: Repo | undefined): Promise<Probe> {
+  let config
+  try { config = configuration() } catch (error) { return { reason: error instanceof Error ? error.message : String(error) } }
+  if (!config) return { reason: null }
+  if (!repo || repo.kind === 'folder') return { reason: 'The project is not a Git repository.' }
+  let repoUrl: string
+  try {
+    repoUrl = (await run('git', ['remote', 'get-url', 'origin'], { cwd: repo.path, encoding: 'utf8', timeout: 10_000 })).stdout.trim()
+    checkRepoUrl(repoUrl)
+  } catch (error) {
+    return { reason: error instanceof Error && !('code' in error) ? error.message : 'The project has no Git origin.' }
+  }
+  const reason = await clusterUnavailable(new DevWorkspaceProvider(config))
+  return reason ? { reason } : { repoUrl }
+}
+
+function logUnavailable(reason: string | null) {
+  if (!reason || reason === loggedReason) return
+  loggedReason = reason
+  console.warn(`Agent workspaces unavailable; creating workspaces on this host: ${reason}`)
+}
+
 const find = (id: string) => {
   const row = records().find((entry) => entry.id === id)
   if (!row) throw new InvalidArgumentError('Unknown Che DevWorkspace runtime.')
@@ -52,10 +94,12 @@ const WorkspaceId = z.object({ workspaceId: z.string().min(1) })
 
 export const CHE_WORKSPACE_METHODS = [
   defineMethod({ name: 'cheWorkspace.listRecipes', params: z.object({ repoId: z.string() }),
-    handler: ({ repoId }, { runtime }) => {
+    handler: async ({ repoId }, { runtime }) => {
       const repo = runtime.listRepos().find((entry) => entry.id === repoId)
+      const result = await probe(repo)
+      if ('reason' in result) logUnavailable(result.reason)
       return { status: 'ok' as const, repoPath: repo?.path ?? null,
-        recipes: configuration() && repo && repo.kind !== 'folder' ? [recipe] : [], diagnostics: [] }
+        recipes: 'repoUrl' in result ? [recipe] : [], diagnostics: [] }
     } }),
   // These credentials travel only through Orca's authenticated, encrypted runtime connection.
   defineMethod({ name: 'cheWorkspace.environments', params: null, handler: () => {
@@ -69,10 +113,16 @@ export const CHE_WORKSPACE_METHODS = [
     workspaceId: z.string().optional(), workspaceName: z.string().optional(), provisionId: z.string().optional(),
     branch: z.string().optional(), ref: z.string().optional()
   }), handler: async (args, { runtime, signal }) => {
-    const backend = provider()
     const repo = runtime.listRepos().find((entry) => entry.id === args.repoId)
-    if (!repo || repo.kind === 'folder') throw new InvalidArgumentError('Select a Git project on the controlling Orca server.')
-    const repoUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: repo.path, encoding: 'utf8', timeout: 10_000 }).trim()
+    const checked = await probe(repo)
+    if (!('repoUrl' in checked)) {
+      // Recheck at create time: the composer's recipe list can be stale.
+      const error = checked.reason ?? 'Agent workspaces are not configured on this Orca server.'
+      logUnavailable(error)
+      return { ok: false as const, fallback: true, error, stdout: '', stderr: '' }
+    }
+    const { repoUrl } = checked
+    const backend = provider()
     const id = randomUUID()
     const allocation = backend.allocation(id)
     const controller = new AbortController()
@@ -102,7 +152,11 @@ export const CHE_WORKSPACE_METHODS = [
     } catch (error) {
       // Rollback is not cancellable; a failed rollback stays recorded for retry.
       await cleanup(find(id))
-      return { ok: false as const, error: error instanceof Error ? error.message : String(error), stdout: '', stderr: '' }
+      // Failures before the DevWorkspace exists (quota, admission, Route) fall back to this host.
+      const fallback = error instanceof Error && (error as Error & { fallback?: boolean }).fallback === true
+      if (fallback) clusterCheck = null
+      return { ok: false as const, ...(fallback ? { fallback: true } : {}),
+        error: error instanceof Error ? error.message : String(error), stdout: '', stderr: '' }
     } finally { signal?.removeEventListener('abort', abort); controllers.delete(key); operations.delete(id) }
   } }),
   defineMethod({ name: 'cheWorkspace.cancelProvision', params: z.object({ provisionId: z.string() }), handler: ({ provisionId }) => {

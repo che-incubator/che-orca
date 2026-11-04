@@ -37,3 +37,50 @@ for (const env of [undefined, [{ name: 'ORCA_PAIRING_ADDRESS', value: 'old' }, {
     assert.equal(created.spec.template.components[0].container.image, 'example/editor:test');
   });
 }
+
+const agentConfig = () => configuration({ ORCA_AGENT_NAMESPACE: 'developer-agent-devspaces',
+  DEVWORKSPACE_NAMESPACE: 'developer-devspaces', DEVWORKSPACE_NAME: 'orca-workspace' });
+const resource = (provider) => provider.allocation('00000000-0000-0000-0000-000000000000');
+const httpError = (statusCode) => Object.assign(new Error(`HTTP ${statusCode}`), { statusCode });
+
+test('failures before the DevWorkspace exists allow a fallback to the source host', async () => {
+  const client = { async request(method, path, body) {
+    if (method === 'POST' && body.kind === 'DevWorkspace') throw httpError(403);
+    if (method === 'GET' && path.endsWith('/orca-agent-editor')) return { spec: { components: [] } };
+    return {};
+  } };
+  const provider = new DevWorkspaceProvider(agentConfig(), client);
+  provider.routeHost = async () => 'agent.apps.example.test';
+  await assert.rejects(provider.create(resource(provider), 'https://github.com/example/repo.git'),
+    (error) => error.fallback === true);
+  await assert.rejects(provider.create(resource(provider), 'http://example.test/repo.git'),
+    (error) => error.fallback === true);
+});
+
+test('failures after the DevWorkspace starts, or after cancellation, do not fall back', async () => {
+  const client = { async request(method, path) {
+    if (method === 'GET' && path.endsWith('/orca-agent-editor')) return { spec: { components: [] } };
+    return {};
+  } };
+  const provider = new DevWorkspaceProvider(agentConfig(), client);
+  provider.routeHost = async () => 'agent.apps.example.test';
+  provider.ready = async () => { throw new Error('Timed out'); };
+  await assert.rejects(provider.create(resource(provider), 'https://github.com/example/repo.git'),
+    (error) => error.fallback === undefined);
+  const cancelled = new AbortController();
+  cancelled.abort();
+  provider.prepare = async () => { throw new Error('Provisioning cancelled.'); };
+  await assert.rejects(provider.create(resource(provider), 'https://github.com/example/repo.git', cancelled.signal),
+    (error) => error.fallback === undefined);
+});
+
+test('reports why the agent namespace cannot be used', async () => {
+  const provider = (template, allowed = () => true) => new DevWorkspaceProvider(agentConfig(), { async request(method, path, body) {
+    if (method === 'GET') return template();
+    return { status: { allowed: allowed(body.spec.resourceAttributes.resource) } };
+  } });
+  assert.equal(await provider(() => ({})).unavailable(), null);
+  assert.match(await provider(() => { throw httpError(404); }).unavailable(), /template is missing/);
+  assert.match(await provider(() => { throw httpError(403); }).unavailable(), /no access/);
+  assert.match(await provider(() => ({}), (name) => name !== 'routes').unavailable(), /cannot create routes/);
+});
