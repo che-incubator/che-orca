@@ -1,15 +1,14 @@
-# Optional, so the editor definition targets work without a deployment configuration.
+# Optional, so `make devfile` works with ORCA_IMAGE and CHE_OPERATOR_DEFINITION alone.
 -include config.env
 export
 .DEFAULT_GOAL := build
 
 ORCA_CONFIGMAP ?= orca-editor-definition
-# che-operator ships the dashboard's copy of devfile.yaml. Point this at a che-operator
-# checkout's editors-definitions/che-orca-next.yaml to update it in place.
+# The editor definition lives only in che-operator. Point this at a che-operator
+# checkout's editors-definitions/che-orca-next.yaml to test a change to it.
 CHE_OPERATOR_DEFINITION ?=
-CHE_OPERATOR_DEFINITION_URL := https://raw.githubusercontent.com/eclipse-che/che-operator/main/editors-definitions/che-orca-next.yaml
 
-.PHONY: check-namespace build push devfile register unregister deploy teardown editor-definition check-editor-definition
+.PHONY: check-namespace build push devfile register unregister deploy teardown
 
 check-namespace:
 	@test -n "$(NAMESPACE)" || { echo "Set NAMESPACE in config.env before registering or removing Orca."; exit 1; }
@@ -20,8 +19,10 @@ build:
 push:
 	podman push $(ORCA_IMAGE)
 
+# Written only after rendering succeeds.
 devfile:
-	python3 shared/render-devfile.py devfile.yaml --output devfile-rendered.yaml
+	@bash -c 'REPO_ROOT="$$PWD"; source shared/deploy.sh && fetch_editor_definition && \
+	  out=$$(render_editor "$$EDITOR_DEFINITION") && printf "%s\n" "$$out" > devfile-rendered.yaml'
 
 register: check-namespace devfile
 	oc create configmap $(ORCA_CONFIGMAP) \
@@ -35,18 +36,6 @@ register: check-namespace devfile
 
 unregister: check-namespace
 	oc delete configmap $(ORCA_CONFIGMAP) -n $(NAMESPACE)
-
-# Prints che-operator's definition rendered from devfile.yaml, or updates CHE_OPERATOR_DEFINITION.
-editor-definition:
-ifeq ($(CHE_OPERATOR_DEFINITION),)
-	@curl -fsSL $(CHE_OPERATOR_DEFINITION_URL) | python3 shared/render-devfile.py devfile.yaml --che-operator /dev/stdin
-else
-	python3 shared/render-devfile.py devfile.yaml --che-operator $(CHE_OPERATOR_DEFINITION) --output $(CHE_OPERATOR_DEFINITION)
-endif
-
-# Fails when che-operator's definition on main differs from devfile.yaml.
-check-editor-definition:
-	@curl -fsSL $(CHE_OPERATOR_DEFINITION_URL) | python3 shared/render-devfile.py devfile.yaml --che-operator /dev/stdin --check
 
 deploy:
 	./deploy.sh

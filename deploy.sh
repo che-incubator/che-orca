@@ -9,7 +9,8 @@ source "$REPO_ROOT/shared/agent-workspaces.sh"
 load_config
 ORCA_IMAGE="${ORCA_IMAGE:?Set ORCA_IMAGE in config.env}"
 check_agent_environment
-render_devfile "$REPO_ROOT/devfile.yaml" --check
+fetch_editor_definition
+render_editor "$EDITOR_DEFINITION" >/dev/null
 
 echo "=== Deploying Orca to namespace: $NAMESPACE ==="
 
@@ -18,7 +19,7 @@ build_and_push_image "$ORCA_IMAGE" "$REPO_ROOT"
 apply_agent_environment
 
 # Step 2: DevWorkspaceTemplate
-create_editor_template "$REPO_ROOT/devfile.yaml" "orca-editor"
+create_editor_template "$EDITOR_DEFINITION" "orca-editor"
 
 # Step 3: DevWorkspace
 create_workspace "orca-workspace" "orca-editor"

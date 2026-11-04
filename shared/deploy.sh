@@ -19,14 +19,55 @@ build_and_push_image() {
   podman push "$image"
 }
 
-render_devfile() (
-  export ORCA_IMAGE
-  python3 "$REPO_ROOT/shared/render-devfile.py" "$@"
-)
+CHE_OPERATOR_DEFINITION_URL=https://raw.githubusercontent.com/eclipse-che/che-operator/main/editors-definitions/che-orca-next.yaml
+
+# Sets EDITOR_DEFINITION to che-operator's Orca editor definition, the only copy. Set
+# CHE_OPERATOR_DEFINITION to a che-operator checkout's file to test a change to it.
+fetch_editor_definition() {
+  if [ -n "${CHE_OPERATOR_DEFINITION:-}" ]; then
+    EDITOR_DEFINITION="$CHE_OPERATOR_DEFINITION"
+    return 0
+  fi
+  EDITOR_DEFINITION=$(mktemp "${TMPDIR:-/tmp}/che-orca-next.XXXXXX") || return 1
+  # shellcheck disable=SC2064 # Expand the path now; the variable can change later.
+  trap "rm -f '$EDITOR_DEFINITION'" EXIT
+  echo "Fetching che-operator's editor definition..."
+  curl -fsSL "$CHE_OPERATOR_DEFINITION_URL" -o "$EDITOR_DEFINITION"
+}
+
+# Prints the editor definition with ORCA_IMAGE in place of the published image, which
+# che-operator's release flow pins. With a name, wraps it in a DevWorkspaceTemplate.
+render_editor() {
+  local definition="$1" template="${2:-}" swap
+  # Only component image fields, with an optional tag and digest; the digest would win.
+  local image='^([[:space:]]*image:[[:space:]]*)quay\.io/che-incubator/che-orca(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?[[:space:]]*$'
+  [ -n "${ORCA_IMAGE:-}" ] || { echo "Set ORCA_IMAGE in config.env" >&2; return 1; }
+  if ! grep -Eq "$image" "$definition"; then
+    echo "No component in $definition uses the quay.io/che-incubator/che-orca image." >&2
+    return 1
+  fi
+  swap="s|$image|\\1$ORCA_IMAGE|"
+  if [ -n "$template" ]; then
+    sed -E "$swap" "$definition" | awk -v name="$template" '
+      BEGIN {
+        print "apiVersion: workspace.devfile.io/v1alpha2"
+        print "kind: DevWorkspaceTemplate"
+        print "metadata:\n  name: " name "\nspec:"
+        keep = 1
+      }
+      # Everything except schemaVersion and metadata goes under spec.
+      /^[A-Za-z][A-Za-z0-9_-]*:/ { keep = $0 !~ /^(schemaVersion|metadata):/ }
+      keep { print (length($0) ? "  " $0 : "") }'
+  else
+    # The dashboard identifies editors by publisher/name/version; don't shadow che-operator's.
+    sed -E "$swap" "$definition" |
+      awk '!done && /^    version: / { print "    version: dev"; done = 1; next } { print }'
+  fi
+}
 
 create_editor_template() {
-  local devfile="$1" editor="$2" manifest
-  manifest=$(render_devfile "$devfile" --template "$editor") || return 1
+  local definition="$1" editor="$2" manifest
+  manifest=$(render_editor "$definition" "$editor") || return 1
   echo "Creating editor template..."
   printf '%s\n' "$manifest" | oc apply -n "$NAMESPACE" -f -
 }

@@ -124,7 +124,7 @@ before the patch applies. The patch applies cleanly to Orca v1.4.219.
 - **Child startup mode:** if `ORCA_PAIRING_ADDRESS` is set, `orcad` binds
   `0.0.0.0`, advertises that address, and serves the plain web client. Otherwise it
   keeps the gateway behaviour, with loopback binding and a private auto-pairing page.
-  The same image and devfile serve both roles.
+  The same image and editor definition serve both roles.
 - **Injector fix:** `entrypoint-init-container.sh` copies directory contents rather
   than the directories themselves. On a surviving volume the old code nested
   `runtime/runtime` and left stale binaries behind.
@@ -141,8 +141,8 @@ it does the following:
    It rejects invalid names and names equal to the user namespace.
 2. Checks that the namespace exists. Creating it just in time needs the operator;
    until then, create it with `oc new-project`.
-3. Applies the `orca-agent-editor` template to the agent namespace, rendered from the
-   same `devfile.yaml`.
+3. Applies the `orca-agent-editor` template to the agent namespace, rendered from
+   che-operator's editor definition.
 4. Applies the `orca-workspace-provisioner` Role and binds it to the user namespace's
    ServiceAccounts.
 5. Creates the `orca-agent-environment` ConfigMap in the user namespace. The
@@ -196,7 +196,7 @@ labels), the Role and binding, and the template. It never deletes the namespace.
 
 ## Tested
 
-- ShellCheck, devfile render check, and the provider's regression tests.
+- ShellCheck, editor definition render check, and the provider's regression tests.
 - Upstream typechecks and the touched areas' tests.
 - The patch applies cleanly to Orca v1.4.219.
 - On CRC 2.56.0 / OpenShift 4.20.1 / Che `next` with Apple silicon:
